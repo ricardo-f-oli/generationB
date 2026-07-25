@@ -15,8 +15,8 @@ import org.springframework.stereotype.Component;
 
 @Generated(
     value = "org.mapstruct.ap.MappingProcessor",
-    date = "2026-07-25T15:30:27-0300",
-    comments = "version: 1.6.3, compiler: javac, environment: Java 21.0.5 (Oracle Corporation)"
+    date = "2026-07-25T16:04:06-0300",
+    comments = "version: 1.6.3, compiler: Eclipse JDT (IDE) 3.46.100.v20260624-0231, environment: Java 21.0.11 (Eclipse Adoptium)"
 )
 @Component
 public class CampaignCardMapperImpl implements CampaignCardMapper {
@@ -29,16 +29,16 @@ public class CampaignCardMapperImpl implements CampaignCardMapper {
 
         CampaignCard campaignCard = new CampaignCard();
 
+        campaignCard.setCampaignId( command.campaignId() );
         campaignCard.setColumnId( command.columnId() );
         campaignCard.setCreatorId( command.creatorId() );
-        campaignCard.setCampaignId( command.campaignId() );
+        campaignCard.setDeadline( command.deadline() );
         List<String> list = command.deliverables();
         if ( list != null ) {
             campaignCard.setDeliverables( new ArrayList<String>( list ) );
         }
         campaignCard.setFeeAmount( command.feeAmount() );
         campaignCard.setFeeCurrency( command.feeCurrency() );
-        campaignCard.setDeadline( command.deadline() );
         campaignCard.setNotes( command.notes() );
 
         return campaignCard;
@@ -97,43 +97,43 @@ public class CampaignCardMapperImpl implements CampaignCardMapper {
             return;
         }
 
+        card.setApprovalStatus( command.approvalStatus() );
         card.setColumnId( command.columnId() );
-        if ( card.getDeliverables() != null ) {
-            List<String> list = command.deliverables();
-            if ( list != null ) {
-                card.getDeliverables().clear();
-                card.getDeliverables().addAll( list );
-            }
-            else {
-                card.setDeliverables( null );
-            }
-        }
-        else {
-            List<String> list = command.deliverables();
-            if ( list != null ) {
-                card.setDeliverables( new ArrayList<String>( list ) );
-            }
-        }
-        card.setFeeAmount( command.feeAmount() );
-        card.setFeeCurrency( command.feeCurrency() );
-        card.setDeadline( command.deadline() );
         if ( card.getContentDraftUrls() != null ) {
-            List<String> list1 = command.contentDraftUrls();
-            if ( list1 != null ) {
+            List<String> list = command.contentDraftUrls();
+            if ( list != null ) {
                 card.getContentDraftUrls().clear();
-                card.getContentDraftUrls().addAll( list1 );
+                card.getContentDraftUrls().addAll( list );
             }
             else {
                 card.setContentDraftUrls( null );
             }
         }
         else {
-            List<String> list1 = command.contentDraftUrls();
-            if ( list1 != null ) {
-                card.setContentDraftUrls( new ArrayList<String>( list1 ) );
+            List<String> list = command.contentDraftUrls();
+            if ( list != null ) {
+                card.setContentDraftUrls( new ArrayList<String>( list ) );
             }
         }
-        card.setApprovalStatus( command.approvalStatus() );
+        card.setDeadline( command.deadline() );
+        if ( card.getDeliverables() != null ) {
+            List<String> list1 = command.deliverables();
+            if ( list1 != null ) {
+                card.getDeliverables().clear();
+                card.getDeliverables().addAll( list1 );
+            }
+            else {
+                card.setDeliverables( null );
+            }
+        }
+        else {
+            List<String> list1 = command.deliverables();
+            if ( list1 != null ) {
+                card.setDeliverables( new ArrayList<String>( list1 ) );
+            }
+        }
+        card.setFeeAmount( command.feeAmount() );
+        card.setFeeCurrency( command.feeCurrency() );
         card.setNotes( command.notes() );
     }
 }

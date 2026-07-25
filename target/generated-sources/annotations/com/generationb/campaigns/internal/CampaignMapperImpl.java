@@ -11,8 +11,8 @@ import org.springframework.stereotype.Component;
 
 @Generated(
     value = "org.mapstruct.ap.MappingProcessor",
-    date = "2026-07-25T15:30:27-0300",
-    comments = "version: 1.6.3, compiler: javac, environment: Java 21.0.5 (Oracle Corporation)"
+    date = "2026-07-25T16:04:06-0300",
+    comments = "version: 1.6.3, compiler: Eclipse JDT (IDE) 3.46.100.v20260624-0231, environment: Java 21.0.11 (Eclipse Adoptium)"
 )
 @Component
 public class CampaignMapperImpl implements CampaignMapper {
@@ -25,10 +25,10 @@ public class CampaignMapperImpl implements CampaignMapper {
 
         Campaign campaign = new Campaign();
 
-        campaign.setName( command.name() );
         campaign.setCampaignType( command.campaignType() );
-        campaign.setStartDate( command.startDate() );
         campaign.setEndDate( command.endDate() );
+        campaign.setName( command.name() );
+        campaign.setStartDate( command.startDate() );
 
         return campaign;
     }

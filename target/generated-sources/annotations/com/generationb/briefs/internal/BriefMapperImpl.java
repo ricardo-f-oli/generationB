@@ -15,8 +15,8 @@ import org.springframework.stereotype.Component;
 
 @Generated(
     value = "org.mapstruct.ap.MappingProcessor",
-    date = "2026-07-25T15:30:27-0300",
-    comments = "version: 1.6.3, compiler: javac, environment: Java 21.0.5 (Oracle Corporation)"
+    date = "2026-07-25T16:04:06-0300",
+    comments = "version: 1.6.3, compiler: Eclipse JDT (IDE) 3.46.100.v20260624-0231, environment: Java 21.0.11 (Eclipse Adoptium)"
 )
 @Component
 public class BriefMapperImpl implements BriefMapper {
@@ -29,19 +29,19 @@ public class BriefMapperImpl implements BriefMapper {
 
         Brief brief = new Brief();
 
-        brief.setCampaignName( command.campaignName() );
+        brief.setAdditionalNotes( command.additionalNotes() );
+        brief.setBudgetMax( command.budgetMax() );
+        brief.setBudgetMin( command.budgetMin() );
         brief.setCampaignGoal( command.campaignGoal() );
-        brief.setKeyMessages( command.keyMessages() );
+        brief.setCampaignName( command.campaignName() );
         List<String> list = command.deliverables();
         if ( list != null ) {
             brief.setDeliverables( new ArrayList<String>( list ) );
         }
-        brief.setBudgetMin( command.budgetMin() );
-        brief.setBudgetMax( command.budgetMax() );
-        brief.setTimelineStart( command.timelineStart() );
+        brief.setKeyMessages( command.keyMessages() );
         brief.setTimelineEnd( command.timelineEnd() );
+        brief.setTimelineStart( command.timelineStart() );
         brief.setToneOfVoice( command.toneOfVoice() );
-        brief.setAdditionalNotes( command.additionalNotes() );
 
         return brief;
     }
@@ -102,9 +102,11 @@ public class BriefMapperImpl implements BriefMapper {
             return;
         }
 
-        brief.setCampaignName( command.campaignName() );
+        brief.setAdditionalNotes( command.additionalNotes() );
+        brief.setBudgetMax( command.budgetMax() );
+        brief.setBudgetMin( command.budgetMin() );
         brief.setCampaignGoal( command.campaignGoal() );
-        brief.setKeyMessages( command.keyMessages() );
+        brief.setCampaignName( command.campaignName() );
         if ( brief.getDeliverables() != null ) {
             List<String> list = command.deliverables();
             if ( list != null ) {
@@ -121,11 +123,9 @@ public class BriefMapperImpl implements BriefMapper {
                 brief.setDeliverables( new ArrayList<String>( list ) );
             }
         }
-        brief.setBudgetMin( command.budgetMin() );
-        brief.setBudgetMax( command.budgetMax() );
-        brief.setTimelineStart( command.timelineStart() );
+        brief.setKeyMessages( command.keyMessages() );
         brief.setTimelineEnd( command.timelineEnd() );
+        brief.setTimelineStart( command.timelineStart() );
         brief.setToneOfVoice( command.toneOfVoice() );
-        brief.setAdditionalNotes( command.additionalNotes() );
     }
 }
