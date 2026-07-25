@@ -1,8 +1,11 @@
 # Compiled class file
 *.class
-*.vscode
-*.claude
-*target
+# IDEs
+.vscode/
+# AI Tools
+.claude/
+# Maven
+target/
 
 # Log file
 *.log
