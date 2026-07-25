@@ -1,0 +1,13 @@
+CREATE TABLE campaigns (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    brand_id UUID NOT NULL REFERENCES brands(id),
+    name VARCHAR(255) NOT NULL,
+    campaign_type VARCHAR(50) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    start_date TIMESTAMP WITH TIME ZONE,
+    end_date TIMESTAMP WITH TIME ZONE,
+    created_by UUID,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP WITH TIME ZONE
+);
