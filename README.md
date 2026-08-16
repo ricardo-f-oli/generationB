@@ -1,106 +1,83 @@
-# Generation B
+# Generation B — Backend API
 
 Creator Management Platform for talent/influencer agencies — built as a modular monolith with Spring Boot and Spring Modulith.
 
 ## Tech Stack
 
-- **Java 21**, Spring Boot 3.4.1
-- **Spring Modulith** — enforces module boundaries (`api` = public surface, `internal` = private implementation)
-- **PostgreSQL** + **Flyway** for schema migrations
-- **Spring Security** with stateless JWT authentication
-- **MapStruct** + **Lombok** for entity/DTO mapping and boilerplate
-- **SendGrid** for outbound/inbound email
-- **Anthropic API** for AI-generated outreach templates and follow-up suggestions
-- **OpenPDF** for brief exports
+- **Java 21**, **Spring Boot 3.4.1**
+- **Spring Modulith** — enforces module boundaries
+- **PostgreSQL** + **Flyway** schema migrations
+- **Spring Security** with JWT authentication & refresh tokens
+- **Lombok** for entity/DTO boilerplate
+- **Docker & Docker Compose** for local orchestration
+- **Mailpit** for local email inspection
 
-## Getting Started
+---
 
-### Prerequisites
+## Quick Start (Local Docker Environment)
 
-- JDK 21
-- Maven (or use the included `mvnw` wrapper, if present)
-- A running PostgreSQL instance
-
-### 1. Create the database
-
-```sql
-CREATE DATABASE generationb;
-```
-
-### 2. Configure environment variables
-
-The app reads its datasource config from environment variables (see `src/main/resources/application.yml`), falling back to local defaults if unset:
-
-| Variable | Default |
-|---|---|
-| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/generationb` |
-| `SPRING_DATASOURCE_USERNAME` | `postgres` |
-| `SPRING_DATASOURCE_PASSWORD` | `postgres` |
-
-Optional integrations (fall back to mock values if unset, so the app runs without them):
-
-| Variable | Purpose |
-|---|---|
-| `outreach.sendgrid.api-key` | SendGrid API key for sending outreach emails |
-| `outreach.sendgrid.webhook-secret` | Validates inbound SendGrid webhook signatures |
-| `anthropic.api-key` | Powers AI-generated outreach templates and follow-up suggestions |
-
-### 3. Run the app
+Run the backend, PostgreSQL database, and Mailpit email inspector with a single command:
 
 ```bash
-mvn spring-boot:run
+docker compose up --build
 ```
 
-Flyway will run migrations automatically on startup (`ddl-auto: validate`, so the schema is fully migration-driven). The API is served on `http://localhost:8080`.
+Services will start:
+- **Backend API**: `http://localhost:8080/api`
+- **PostgreSQL DB**: `localhost:5432` (`generationb`)
+- **Mailpit Web UI**: `http://localhost:8025` (captures dev password reset emails)
 
-### 4. Authenticate
+---
 
-There's no real user/password flow yet — `POST /api/auth/login` mints a JWT from whatever `email`, `role`, `brandId`, and `userId` you pass in (defaulting to a stub admin/brand if omitted):
+## Local Test Accounts (Dev Seed Data)
 
-```bash
-curl -X POST http://localhost:8080/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"user@agency.com","role":"ADMIN"}'
-```
+All test accounts are seeded automatically via Flyway migration `V15__seed_dev_users.sql` with default password: `Password123!`
 
-Use the returned token as a `Bearer` token on all other endpoints (everything under `/api/**` requires auth except `/api/auth/login`, `/api/creators/register`, and `/api/briefs/share/**`).
+| Role | Email | Username | Password |
+|---|---|---|---|
+| **ADMIN** | `admin@generationb.dev` | `admin` | `Password123!` |
+| **DIRECTOR** | `director@generationb.dev` | `director` | `Password123!` |
+| **ACCOUNT_MANAGER** | `am@generationb.dev` | `am` | `Password123!` |
+| **ACCOUNT_EXECUTIVE** | `ae@generationb.dev` | `ae` | `Password123!` |
 
-### Running tests
+---
 
-```bash
-mvn test
-```
+## Authentication API Endpoints
 
-Includes Spring Modulith tests that verify module boundaries aren't violated, plus integration tests (H2 for tests, Testcontainers-style patterns not required at runtime).
+- `POST /api/auth/login` — accepts `{ "identifier": "admin@generationb.dev", "password": "Password123!" }`
+- `POST /api/auth/refresh` — accepts `{ "refreshToken": "..." }`
+- `POST /api/auth/logout` — accepts `{ "refreshToken": "..." }`
+- `POST /api/auth/forgot-password` — accepts `{ "email": "admin@generationb.dev" }`
+- `POST /api/auth/reset-password` — accepts `{ "token": "...", "newPassword": "..." }`
+- `GET /api/auth/me` — returns authenticated user data
 
-## What's Currently Functional
+---
 
-The codebase is organized as Spring Modulith application modules. Modules with real implementations:
+## Production Free Deployment Guide
 
-- **`foundation`** — JWT auth/login, security config, audit logging (AOP-based), global exception handling, brand-scoped request context.
-- **`briefs`** — Creative briefs: create/update/list/fetch, PDF export, share-via-link (with a public token-based view endpoint), AI-assisted generation, and contract clauses attached to a brief (with reordering).
-- **`campaigns`** — Campaigns CRUD/archive, plus a Kanban board system per campaign: boards, cards, drag-and-drop move, bulk move, payment status tracking on cards.
-- **`outreach`** — Outreach templates (CRUD + AI-generation via Anthropic), outreach campaigns with recipients (add/remove, preview merged content, send/schedule), email thread history per recipient, SendGrid inbound/outbound webhook handling, and AI-suggested follow-ups.
+### 1. Database: Neon (Free Managed PostgreSQL)
+1. Create a free account on [Neon.tech](https://neon.tech).
+2. Create a project named `generationb`.
+3. Copy the PostgreSQL connection string (`postgres://user:password@ep-xxx.neon.tech/generationb?sslmode=require`).
 
-Modules that exist as module boundaries but currently have **no implementation** (empty except for the `@ApplicationModule` marker):
+### 2. Backend: Render (Free Web Service)
+1. Create a free account on [Render.com](https://render.com).
+2. Create a **Web Service** connected to your GitHub repository `generationB`.
+3. Select **Docker** environment.
+4. Set Environment Variables:
+   - `SPRING_PROFILES_ACTIVE`: `prod`
+   - `SPRING_DATASOURCE_URL`: `jdbc:postgresql://<neon-host>:5432/generationb?sslmode=require`
+   - `SPRING_DATASOURCE_USERNAME`: `<neon-username>`
+   - `SPRING_DATASOURCE_PASSWORD`: `<neon-password>`
+   - `JWT_SECRET`: `<generate-a-long-random-256bit-string>`
+   - `RESEND_API_KEY`: `<your-resend-api-key>`
+   - `FRONTEND_URL`: `https://generation-bfe.vercel.app`
+   - `CORS_ALLOWED_ORIGINS`: `https://generation-bfe.vercel.app`
 
-- **`creators`**
-- **`gifting`**
-- **`coverage`**
-- **`reporting`**
+### 3. Email: Resend (Free Transactional Email)
+1. Create a free account on [Resend.com](https://resend.com).
+2. Generate an API Key and set it in Render as `RESEND_API_KEY`.
 
-Note: security currently permits `/api/creators/register`, but the `creators` module itself has no code yet — that route isn't implemented.
-
-## Module Structure
-
-Each module follows the same shape:
-
-```
-<module>/
-  api/          <- REST controllers (public)
-  internal/     <- entities, repositories, services (package-private, not accessible from other modules)
-  *.java        <- DTOs, enums, commands (public, shared contract)
-  package-info.java <- @ApplicationModule marker
-```
-
-Cross-module communication goes through Spring application events (see `shared/` for event/query types like `CardMovedEvent`, `CreatorFlaggedEvent`, `ResolveCreatorContactQuery`) rather than direct calls into another module's `internal` package.
+### 4. Frontend: Vercel
+1. Set `VITE_USE_MOCK_DATA=false` in Vercel project environment variables.
+2. Set `VITE_API_BASE_URL=https://<your-render-app>.onrender.com/api`.

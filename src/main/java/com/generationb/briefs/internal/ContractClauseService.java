@@ -34,7 +34,7 @@ public class ContractClauseService {
      * @return list of active ContractClauseResponse DTOs.
      */
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE', 'VIEW_ONLY')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
     public List<ContractClauseResponse> listClauses() {
         return contractClauseRepository.findAllByBrandIdAndIsActiveTrueOrderByDisplayOrder().stream()
                 .map(contractClauseMapper::toResponse)

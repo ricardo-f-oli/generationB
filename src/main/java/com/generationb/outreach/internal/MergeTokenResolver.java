@@ -1,89 +1,86 @@
 package com.generationb.outreach.internal;
 
-import com.generationb.shared.ResolveLastWorkedWithQuery;
-import com.generationb.shared.ResolveLastWorkedWithResponseEvent;
+import com.generationb.shared.CreatorLookupPort;
+import com.generationb.foundation.BrandLookupPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Resolves merge tokens in outreach subject/body copy.
+ *
+ * <p>Q-E3: the {@code {last_worked_with}} token used to be resolved by publishing an
+ * ApplicationEvent and then immediately reading a shared map — correct only by accident of Spring
+ * events being synchronous. It now calls a published port.
+ *
+ * <p>Q-J5: {@code {brand}} used to resolve to the brand's raw UUID, which was then emailed to
+ * creators verbatim.
+ */
 @Service
 public class MergeTokenResolver {
 
     private static final Logger log = LoggerFactory.getLogger(MergeTokenResolver.class);
 
-    private final ApplicationEventPublisher eventPublisher;
-    private final Map<UUID, String> pendingLastWorkedWithResponses = new ConcurrentHashMap<>();
+    private final CreatorLookupPort creatorLookup;
+    private final BrandLookupPort brandLookup;
 
-    public MergeTokenResolver(ApplicationEventPublisher eventPublisher) {
-        this.eventPublisher = eventPublisher;
+    public MergeTokenResolver(CreatorLookupPort creatorLookup, BrandLookupPort brandLookup) {
+        this.creatorLookup = creatorLookup;
+        this.brandLookup = brandLookup;
     }
 
-    @EventListener
-    public void handleLastWorkedWithResponse(ResolveLastWorkedWithResponseEvent event) {
-        if (event.lastWorkedWith() != null) {
-            pendingLastWorkedWithResponses.put(event.requestId(), event.lastWorkedWith());
-        } else {
-            pendingLastWorkedWithResponses.put(event.requestId(), "");
-        }
-    }
-
-    public String resolveText(String templateText, OutreachRecipient recipient, OutreachCampaign campaign, String brandName) {
+    public String resolveText(String templateText, OutreachRecipient recipient,
+                              OutreachCampaign campaign, String brandNameOverride) {
         if (templateText == null) {
             return "";
         }
 
         String result = templateText;
+        result = replaceToken(result, "{first_name}", recipient.getCreatorFirstName());
+        result = replaceToken(result, "{handle}", recipient.getCreatorHandle());
+        result = replaceToken(result, "{brand}", resolveBrandName(recipient, brandNameOverride));
+        result = replaceToken(result, "{product}", campaign != null ? campaign.getProductName() : null);
 
-        // {first_name} -> recipient.creator_first_name
-        String firstName = recipient.getCreatorFirstName();
-        result = replaceToken(result, "{first_name}", firstName);
-
-        // {handle} -> recipient.creator_handle
-        String handle = recipient.getCreatorHandle();
-        result = replaceToken(result, "{handle}", handle);
-
-        // {brand} -> brandName or passed campaign brand
-        result = replaceToken(result, "{brand}", brandName);
-
-        // {product} -> campaign.productName
-        String product = campaign != null ? campaign.getProductName() : null;
-        result = replaceToken(result, "{product}", product);
-
-        // {last_worked_with} -> Resolve via application event
         if (result.contains("{last_worked_with}")) {
-            String lastWorkedWith = resolveLastWorkedWith(recipient.getCreatorId(), recipient.getBrandId());
+            String lastWorkedWith = creatorLookup
+                    .findLastWorkedWith(recipient.getCreatorId(), recipient.getBrandId())
+                    .orElse("");
             result = replaceToken(result, "{last_worked_with}", lastWorkedWith);
         }
 
         return result;
     }
 
-    private String resolveLastWorkedWith(UUID creatorId, UUID brandId) {
-        if (creatorId == null) {
+    private String resolveBrandName(OutreachRecipient recipient, String override) {
+        if (override != null && !override.isBlank() && !isUuid(override)) {
+            return override;
+        }
+        UUID brandId = recipient.getBrandId();
+        if (brandId == null) {
             return "";
         }
-        UUID requestId = UUID.randomUUID();
-        eventPublisher.publishEvent(new ResolveLastWorkedWithQuery(requestId, creatorId, brandId));
-        String response = pendingLastWorkedWithResponses.remove(requestId);
-        return response != null ? response : "";
+        return brandLookup.findBrandName(brandId).orElse("");
+    }
+
+    private boolean isUuid(String value) {
+        try {
+            UUID.fromString(value);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private String replaceToken(String input, String token, String value) {
         if (!input.contains(token)) {
             return input;
         }
-
         if (value == null || value.trim().isEmpty()) {
-            log.warn("Token {} missing data, replacing with empty string.", token);
+            log.warn("Merge token {} had no value; substituting an empty string", token);
             return input.replace(token, "");
         }
-
         return input.replace(token, value);
     }
 }

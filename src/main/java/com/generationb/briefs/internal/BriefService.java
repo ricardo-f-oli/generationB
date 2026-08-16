@@ -1,6 +1,7 @@
 package com.generationb.briefs.internal;
 
 import com.generationb.briefs.*;
+import com.generationb.foundation.ApiException;
 import com.generationb.foundation.Audited;
 import com.generationb.foundation.BrandContext;
 import com.lowagie.text.Document;
@@ -13,7 +14,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -61,7 +61,7 @@ public class BriefService {
      * @return a page of briefs.
      */
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE', 'VIEW_ONLY')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
     public Page<BriefResponse> listBriefs(Pageable pageable) {
         return briefRepository.findAllByBrandIdAndDeletedAtIsNull(pageable)
                 .map(briefMapper::toResponse);
@@ -74,7 +74,7 @@ public class BriefService {
      * @return the matching BriefResponse.
      */
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE', 'VIEW_ONLY')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
     public BriefResponse getBrief(UUID id) {
         Brief brief = briefRepository.findByIdAndBrandId(id)
                 .orElseThrow(() -> new IllegalArgumentException("Brief not found"));
@@ -135,7 +135,7 @@ public class BriefService {
      * @return the raw bytes of the generated PDF.
      */
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE', 'VIEW_ONLY')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
     public byte[] exportBriefAsPdf(UUID briefId) {
         Brief brief = briefRepository.findByIdAndBrandId(briefId)
                 .orElseThrow(() -> new IllegalArgumentException("Brief not found"));
@@ -150,7 +150,7 @@ public class BriefService {
             document.add(new Paragraph("Goal: " + brief.getCampaignGoal()));
             document.add(new Paragraph("Key Messages: " + brief.getKeyMessages()));
             document.add(new Paragraph("Tone of Voice: " + brief.getToneOfVoice()));
-            document.add(new Paragraph("Budget: £" + brief.getBudgetMin() + " - £" + brief.getBudgetMax()));
+            document.add(new Paragraph("Budget: " + formatBudget(brief.getBudgetMin(), brief.getBudgetMax())));
             if (brief.getAiGeneratedContent() != null) {
                 document.add(new Paragraph("\nAI Generated Details:\n" + brief.getAiGeneratedContent()));
             }
@@ -180,7 +180,7 @@ public class BriefService {
         share.setBrandId(brief.getBrandId());
 
         briefShareRepository.save(share);
-        return "/api/public/briefs/share/" + share.getToken();
+        return "/brief/shared/" + share.getToken();
     }
 
     /**
@@ -209,14 +209,25 @@ public class BriefService {
         if (share.getExpiresAt().isBefore(Instant.now())) {
             throw new IllegalArgumentException("Share token has expired");
         }
-        // Force BrandContext for base queries executed downstream (in case of SpEL constraints)
-        BrandContext.setCurrentBrandId(share.getBrandId());
-        try {
+        // The share token carries its own tenant, so downstream brand-scoped queries are bound
+        // to the brand that owns the brief rather than to the (anonymous) caller.
+        BriefResponse[] holder = new BriefResponse[1];
+        BrandContext.runAs(share.getBrandId(), null, () -> {
             Brief brief = briefRepository.findById(share.getBriefId())
-                    .orElseThrow(() -> new IllegalArgumentException("Shared brief not found"));
-            return briefMapper.toResponse(brief);
-        } finally {
-            BrandContext.clear();
+                    .orElseThrow(() -> ApiException.notFound("Shared brief"));
+            holder[0] = briefMapper.toResponse(brief);
+        });
+        return holder[0];
+    }
+
+    /** Q-J1: the PDF used to print "£null - £null" when no budget was set. */
+    private String formatBudget(java.math.BigDecimal min, java.math.BigDecimal max) {
+        if (min == null && max == null) {
+            return "Not specified";
         }
+        if (min != null && max != null) {
+            return "£" + min.toPlainString() + " - £" + max.toPlainString();
+        }
+        return "£" + (min != null ? min.toPlainString() : max.toPlainString());
     }
 }

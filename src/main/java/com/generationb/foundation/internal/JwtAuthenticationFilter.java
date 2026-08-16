@@ -1,11 +1,16 @@
 package com.generationb.foundation.internal;
 
 import com.generationb.foundation.BrandContext;
+import com.generationb.foundation.Role;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -20,47 +25,75 @@ import java.util.UUID;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    private final JwtUtil jwtUtil;
-    private final BrandContext brandContext;
+    private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
-    public JwtAuthenticationFilter(JwtUtil jwtUtil, BrandContext brandContext) {
+    private final JwtUtil jwtUtil;
+
+    public JwtAuthenticationFilter(JwtUtil jwtUtil) {
         this.jwtUtil = jwtUtil;
-        this.brandContext = brandContext;
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
+        String correlationId = UUID.randomUUID().toString();
+        MDC.put("requestId", correlationId);
         try {
-            String authHeader = request.getHeader("Authorization");
-            if (authHeader != null && authHeader.startsWith("Bearer ")) {
-                String token = authHeader.substring(7);
-                Claims claims = jwtUtil.extractClaims(token);
-                String email = claims.getSubject();
-                String brandIdStr = claims.get("brand_id", String.class);
-                String userIdStr = claims.get("user_id", String.class);
-                String role = claims.get("role", String.class);
-
-                if (email != null && brandIdStr != null) {
-                    UUID brandId = UUID.fromString(brandIdStr);
-                    UUID userId = userIdStr != null ? UUID.fromString(userIdStr) : null;
-
-                    brandContext.setBrandId(brandId);
-                    brandContext.setUserId(userId);
-                    BrandContext.setCurrentBrandId(brandId);
-                    BrandContext.setCurrentUserId(userId);
-
-                    SimpleGrantedAuthority authority = new SimpleGrantedAuthority("ROLE_" + role);
-                    UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                            email, null, Collections.singletonList(authority)
-                    );
-                    auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(auth);
-                }
-            }
+            authenticate(request);
             filterChain.doFilter(request, response);
         } finally {
             BrandContext.clear();
+            SecurityContextHolder.clearContext();
+            MDC.clear();
+        }
+    }
+
+    /**
+     * Q-A5: {@code extractClaims} used to run outside any try/catch, so an expired token escaped
+     * the filter as a 500. An unreadable token now simply leaves the request unauthenticated, and
+     * the entry point turns that into a 401 — which is what the frontend's refresh flow keys on.
+     */
+    private void authenticate(HttpServletRequest request) {
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return;
+        }
+
+        String token = authHeader.substring(7);
+        try {
+            Claims claims = jwtUtil.extractClaims(token);
+            String email = claims.getSubject();
+            String brandIdStr = claims.get("brand_id", String.class);
+            String userIdStr = claims.get("user_id", String.class);
+            String roleStr = claims.get("role", String.class);
+
+            if (email == null || brandIdStr == null || roleStr == null) {
+                return;
+            }
+
+            Role role = Role.fromString(roleStr);
+            if (role == null) {
+                log.warn("Rejecting token carrying unknown role '{}'", roleStr);
+                return;
+            }
+
+            UUID brandId = UUID.fromString(brandIdStr);
+            UUID userId = userIdStr != null ? UUID.fromString(userIdStr) : null;
+
+            BrandContext.set(brandId, userId, role.name());
+            MDC.put("brandId", brandId.toString());
+            if (userId != null) {
+                MDC.put("userId", userId.toString());
+            }
+
+            UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                    email, null, Collections.singletonList(new SimpleGrantedAuthority(role.authority()))
+            );
+            auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+            SecurityContextHolder.getContext().setAuthentication(auth);
+        } catch (JwtException | IllegalArgumentException ex) {
+            // Expired, malformed or tampered token: stay anonymous, let the entry point answer 401.
+            log.debug("Rejected bearer token: {}", ex.getMessage());
         }
     }
 }

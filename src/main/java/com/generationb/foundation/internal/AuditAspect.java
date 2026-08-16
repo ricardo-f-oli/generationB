@@ -36,6 +36,10 @@ public class AuditAspect {
         }
 
         String action = getAction(methodName);
+        if ("READ".equals(action)) {
+            // Q-E6: exportBriefAsPdf() and getSharedBriefLink() used to write UPDATE rows.
+            return joinPoint.proceed();
+        }
         UUID brandId = BrandContext.getCurrentBrandId();
         if (brandId == null) {
             brandId = UUID.fromString("00000000-0000-0000-0000-000000000000");
@@ -110,14 +114,26 @@ public class AuditAspect {
         entityManager.persist(log);
     }
 
+    /** Method-name prefixes that are reads and must not produce an audit entry (Q-E6). */
+    private static final Set<String> READ_PREFIXES = Set.of(
+            "get", "find", "list", "search", "export", "preview", "count", "is", "has");
+
     private String getAction(String methodName) {
-        if (methodName.startsWith("create") || methodName.startsWith("save")) {
-            return "CREATE";
-        } else if (methodName.startsWith("delete") || methodName.startsWith("archive")) {
-            return "DELETE";
-        } else {
-            return "UPDATE";
+        for (String prefix : READ_PREFIXES) {
+            if (methodName.startsWith(prefix)) {
+                return "READ";
+            }
         }
+        if (methodName.startsWith("create") || methodName.startsWith("save")
+                || methodName.startsWith("add") || methodName.startsWith("import")
+                || methodName.startsWith("register")) {
+            return "CREATE";
+        }
+        if (methodName.startsWith("delete") || methodName.startsWith("archive")
+                || methodName.startsWith("remove") || methodName.startsWith("anonymise")) {
+            return "DELETE";
+        }
+        return "UPDATE";
     }
 
     private Class<?> getEntityClass(String serviceName, String methodName) {
@@ -172,6 +188,14 @@ public class AuditAspect {
         }
     }
 
+    /**
+     * Q-B21: field names that must never be snapshotted into audit_log. The audit trail records
+     * that something changed and by whom; it is not a second copy of everyone's personal data.
+     */
+    private static final Set<String> REDACTED_FIELDS = Set.of(
+            "password", "passwordhash", "tokenhash", "tokendigest", "secret",
+            "email", "phone", "street", "postalcode", "notetext", "bodytext", "bodyhtml");
+
     private Map<String, Object> entityToMap(Object entity) {
         if (entity == null) {
             return null;
@@ -193,7 +217,11 @@ public class AuditAspect {
                 field.setAccessible(true);
                 try {
                     Object val = field.get(entity);
-                    map.put(field.getName(), val);
+                    if (REDACTED_FIELDS.contains(field.getName().toLowerCase())) {
+                        map.put(field.getName(), val == null ? null : "[redacted]");
+                    } else {
+                        map.put(field.getName(), val);
+                    }
                 } catch (IllegalAccessException e) {
                     // ignore
                 }

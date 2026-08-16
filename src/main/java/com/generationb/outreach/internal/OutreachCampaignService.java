@@ -3,13 +3,13 @@ package com.generationb.outreach.internal;
 import com.generationb.foundation.Audited;
 import com.generationb.foundation.BrandContext;
 import com.generationb.outreach.*;
+import com.generationb.shared.CreatorLookupPort;
+import com.generationb.foundation.ApiException;
+import com.generationb.foundation.BrandLookupPort;
 import com.generationb.shared.OutreachBatchSentEvent;
-import com.generationb.shared.ResolveCreatorContactQuery;
-import com.generationb.shared.ResolveCreatorContactResponseEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,8 +33,8 @@ public class OutreachCampaignService {
     private final MergeTokenResolver tokenResolver;
     private final SendGridEmailSender emailSender;
     private final ApplicationEventPublisher eventPublisher;
-
-    private final Map<UUID, ResolveCreatorContactResponseEvent> contactResponses = new HashMap<>();
+    private final CreatorLookupPort creatorLookup;
+    private final BrandLookupPort brandLookup;
 
     public OutreachCampaignService(
             OutreachCampaignRepository campaignRepository,
@@ -42,18 +42,17 @@ public class OutreachCampaignService {
             OutreachTemplateRepository templateRepository,
             MergeTokenResolver tokenResolver,
             SendGridEmailSender emailSender,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            CreatorLookupPort creatorLookup,
+            BrandLookupPort brandLookup) {
         this.campaignRepository = campaignRepository;
         this.recipientRepository = recipientRepository;
         this.templateRepository = templateRepository;
         this.tokenResolver = tokenResolver;
         this.emailSender = emailSender;
         this.eventPublisher = eventPublisher;
-    }
-
-    @EventListener
-    public void handleCreatorContactResponse(ResolveCreatorContactResponseEvent event) {
-        contactResponses.put(event.requestId(), event);
+        this.creatorLookup = creatorLookup;
+        this.brandLookup = brandLookup;
     }
 
     /**
@@ -84,26 +83,27 @@ public class OutreachCampaignService {
             .orElseThrow(() -> new IllegalArgumentException("Campaign not found with id: " + campaignId));
 
         for (UUID creatorId : creatorIds) {
-            UUID requestId = UUID.randomUUID();
-            eventPublisher.publishEvent(new ResolveCreatorContactQuery(requestId, creatorId, campaign.getBrandId()));
+            // Q-E13 / requirement #21: never add a suppressed creator to a send list.
+            if (creatorLookup.isSuppressed(creatorId)) {
+                log.info("Skipping suppressed creator {} for campaign {}", creatorId, campaignId);
+                continue;
+            }
 
-            ResolveCreatorContactResponseEvent response = contactResponses.remove(requestId);
+            CreatorLookupPort.CreatorContact contact = creatorLookup.findContact(creatorId)
+                    .orElseThrow(() -> ApiException.notFound("Creator"));
+            if (contact.email() == null || contact.email().isBlank()) {
+                log.warn("Skipping creator {} because they have no email address", creatorId);
+                continue;
+            }
 
             OutreachRecipient recipient = new OutreachRecipient();
             recipient.setOutreachCampaignId(campaign.getId());
             recipient.setBrandId(campaign.getBrandId());
             recipient.setCreatorId(creatorId);
             recipient.setStatus(RecipientStatus.NOT_SENT);
-
-            if (response != null) {
-                recipient.setCreatorEmail(response.creatorEmail());
-                recipient.setCreatorFirstName(response.creatorFirstName());
-                recipient.setCreatorHandle(response.creatorHandle());
-            } else {
-                recipient.setCreatorEmail("creator-" + creatorId + "@example.com");
-                recipient.setCreatorFirstName("Creator");
-                recipient.setCreatorHandle("handle_" + creatorId.toString().substring(0, 6));
-            }
+            recipient.setCreatorEmail(contact.email());
+            recipient.setCreatorFirstName(contact.firstName());
+            recipient.setCreatorHandle(contact.handle());
 
             recipientRepository.save(recipient);
         }
@@ -134,7 +134,7 @@ public class OutreachCampaignService {
         OutreachRecipient recipient = recipientRepository.findById(recipientId)
             .orElseThrow(() -> new IllegalArgumentException("Recipient not found with id: " + recipientId));
 
-        String brandName = campaign.getBrandId() != null ? campaign.getBrandId().toString() : "Default Brand";
+        String brandName = brandLookup.findBrandName(campaign.getBrandId()).orElse("");
         String resolvedSubject = tokenResolver.resolveText(campaign.getSubject(), recipient, campaign, brandName);
         String resolvedBody = tokenResolver.resolveText(campaign.getBody(), recipient, campaign, brandName);
 
@@ -167,22 +167,36 @@ public class OutreachCampaignService {
         campaign.setStatus(OutreachCampaignStatus.SENDING);
         campaignRepository.save(campaign);
 
-        String brandName = campaign.getBrandId() != null ? campaign.getBrandId().toString() : "Default Brand";
+        String brandName = brandLookup.findBrandName(campaign.getBrandId()).orElse("");
 
         for (OutreachRecipient recipient : recipients) {
-            String resolvedSubject = tokenResolver.resolveText(campaign.getSubject(), recipient, campaign, brandName);
-            String resolvedBody = tokenResolver.resolveText(campaign.getBody(), recipient, campaign, brandName);
-            recipient.setResolvedSubject(resolvedSubject);
-            recipient.setResolvedBody(resolvedBody);
-            recipient.setStatus(RecipientStatus.SENT);
-            recipient.setSentAt(Instant.now());
+            recipient.setResolvedSubject(
+                    tokenResolver.resolveText(campaign.getSubject(), recipient, campaign, brandName));
+            recipient.setResolvedBody(
+                    tokenResolver.resolveText(campaign.getBody(), recipient, campaign, brandName));
         }
-
-        emailSender.sendBatch(campaign, recipients, "user@btheagency.com");
-
         recipientRepository.saveAll(recipients);
 
-        campaign.setStatus(OutreachCampaignStatus.SENT);
+        // Q-E12: status reflects what actually happened per recipient, instead of everyone
+        // being marked SENT before the provider was even called.
+        SendGridEmailSender.BatchResult result = emailSender.sendBatch(campaign, recipients);
+
+        for (OutreachRecipient recipient : recipients) {
+            if (result.failedRecipientIds().contains(recipient.getId())) {
+                recipient.setStatus(RecipientStatus.FAILED);
+            } else {
+                recipient.setStatus(RecipientStatus.SENT);
+                recipient.setSentAt(Instant.now());
+                // Requirement #19: send history is finally written.
+                creatorLookup.recordSend(recipient.getCreatorId(), recipient.getBrandId(),
+                        campaign.getCampaignId(), "OUTREACH", campaign.getProductName());
+            }
+        }
+        recipientRepository.saveAll(recipients);
+
+        campaign.setStatus(result.failedRecipientIds().isEmpty()
+                ? OutreachCampaignStatus.SENT
+                : OutreachCampaignStatus.PARTIALLY_FAILED);
         campaign.setSentAt(Instant.now());
         OutreachCampaign saved = campaignRepository.save(campaign);
 

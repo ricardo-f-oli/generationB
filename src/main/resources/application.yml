@@ -1,9 +1,19 @@
 spring:
+  application:
+    name: generationb
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/generationb}
     username: ${SPRING_DATASOURCE_USERNAME:postgres}
     password: ${SPRING_DATASOURCE_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      # Q-G7: Render free tier is a single small instance and Neon free tier caps
+      # connections, so the pool is deliberately small.
+      maximum-pool-size: ${DB_POOL_MAX:5}
+      minimum-idle: 1
+      connection-timeout: 20000
+      idle-timeout: 300000
+      max-lifetime: 1200000
   jpa:
     hibernate:
       ddl-auto: validate
@@ -11,5 +21,71 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+        # Q-G7: batch writes instead of one round trip per row.
+        jdbc:
+          batch_size: 50
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+        query:
+          fail_on_pagination_over_collection_fetch: true
   flyway:
     enabled: true
+    baseline-on-migrate: true
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json,text/plain
+  error:
+    include-message: never
+    include-stacktrace: never
+
+# Q-J17: one canonical timezone for the whole platform.
+app:
+  timezone: Europe/London
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  cookie-secure: ${COOKIE_SECURE:false}
+
+jwt:
+  access-token-minutes: ${JWT_ACCESS_MINUTES:30}
+
+# Q-B18/Q-B19: Groq is the LLM provider (free tier, OpenAI-compatible API).
+# Without a key the services fall back to a deterministic local draft rather than failing.
+ai:
+  provider: groq
+  base-url: ${AI_BASE_URL:https://api.groq.com/openai/v1}
+  api-key: ${GROQ_API_KEY:}
+  model: ${AI_MODEL:llama-3.3-70b-versatile}
+  timeout-seconds: ${AI_TIMEOUT_SECONDS:20}
+  max-tokens: ${AI_MAX_TOKENS:1200}
+
+outreach:
+  sendgrid:
+    api-key: ${OUTREACH_SENDGRID_API_KEY:}
+    from-address: ${OUTREACH_FROM_ADDRESS:noreply@btheagency.com}
+    from-name: ${OUTREACH_FROM_NAME:B. The Agency}
+    reply-domain: ${OUTREACH_REPLY_DOMAIN:reply.btheagency.com}
+    webhook-public-key: ${SENDGRID_WEBHOOK_PUBLIC_KEY:}
+  follow-up:
+    default-window-days: ${FOLLOW_UP_WINDOW_DAYS:7}
+
+resend:
+  api-key: ${RESEND_API_KEY:}
+
+logging:
+  level:
+    root: INFO
+    com.generationb: ${LOG_LEVEL:INFO}
+  pattern:
+    # Q-E32: correlation ids on every line.
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{requestId:-}] [%X{brandId:-}] %logger{36} - %msg%n"
