@@ -118,7 +118,7 @@ public class GiftingService {
      */
     @Transactional
     public AddressCaptureResult requestAddresses(AddressCaptureRequest request) {
-        BrandContext.requireBrandId();
+        UUID brandId = BrandContext.requireBrandId();
         List<String> warnings = new ArrayList<>();
         int sent = 0;
         int skipped = 0;
@@ -157,6 +157,7 @@ public class GiftingService {
             }
 
             address.setCampaignId(request.campaignId());
+            address.setBrandId(brandId);
             address.setCaptureToken(newToken());
             address.setTokenExpiresAt(Instant.now().plus(TOKEN_VALID_DAYS, ChronoUnit.DAYS));
             address.setRequestedAt(Instant.now());
@@ -178,7 +179,12 @@ public class GiftingService {
         String name = creatorLookup.findContact(address.getCreatorId())
                 .map(CreatorLookupPort.CreatorContact::firstName)
                 .orElse("there");
-        return new AddressFormView(name, "Generation B", address.isCaptured());
+        // The brand is read from the record, not hard-coded: the consent wording on the form
+        // names it, so it has to be the brand that actually asked.
+        String brandName = address.getBrandId() == null
+                ? "us"
+                : brandLookup.findBrandName(address.getBrandId()).orElse("us");
+        return new AddressFormView(name, brandName, address.isCaptured());
     }
 
     /** The public form's write side. */

@@ -36,6 +36,13 @@ public class GiftingAddress {
     @Column(name = "campaign_id")
     private UUID campaignId;
 
+    /**
+     * Which brand asked for this address. The consent wording on the public form names the
+     * brand, so the record has to say which one it was.
+     */
+    @Column(name = "brand_id")
+    private UUID brandId;
+
     @Column(name = "recipient_name")
     private String recipientName;
 
