@@ -37,6 +37,15 @@ public class CampaignBoardAdapter implements CampaignBoardPort {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public Optional<String> findCampaignName(UUID campaignId) {
+        if (campaignId == null) {
+            return Optional.empty();
+        }
+        return campaignRepository.findByIdAndBrandId(campaignId).map(Campaign::getName);
+    }
+
+    @Override
     @Transactional
     public PromotionResult promoteCreators(UUID campaignId, List<UUID> creatorIds, String targetColumnName) {
         Campaign campaign = campaignRepository.findByIdAndBrandId(campaignId)

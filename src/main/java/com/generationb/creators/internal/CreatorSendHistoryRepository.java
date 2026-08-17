@@ -29,4 +29,18 @@ public interface CreatorSendHistoryRepository extends JpaRepository<CreatorSendH
         WHERE h.creatorId = :creatorId AND h.brandId <> :brandId
         """)
     boolean existsForOtherBrand(@Param("creatorId") UUID creatorId, @Param("brandId") UUID brandId);
+
+    /** Requirement #15: which creators this brand sent to inside the window. */
+    @Query(value = """
+        SELECT DISTINCT creator_id
+        FROM creator_send_history
+        WHERE brand_id = :brandId
+          AND (CAST(:campaignId AS uuid) IS NULL OR campaign_id = :campaignId)
+          AND (CAST(:from AS date) IS NULL OR sent_at >= CAST(:from AS date))
+          AND (CAST(:to   AS date) IS NULL OR sent_at < CAST(:to AS date) + INTERVAL '1 day')
+        """, nativeQuery = true)
+    List<UUID> distinctCreatorsSent(@Param("brandId") java.util.UUID brandId,
+                                    @Param("campaignId") java.util.UUID campaignId,
+                                    @Param("from") java.time.LocalDate from,
+                                    @Param("to") java.time.LocalDate to);
 }

@@ -6,6 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -30,6 +32,7 @@ public class CreatorLookupAdapter implements CreatorLookupPort {
     private final CreatorSendHistoryRepository sendHistoryRepository;
     private final GlobalSuppressionRepository suppressionRepository;
     private final CreatorBrandLinkRepository brandLinkRepository;
+    private final CreatorFollowerSnapshotRepository snapshotRepository;
     private final CreatorService creatorService;
 
     @Override
@@ -107,6 +110,28 @@ public class CreatorLookupAdapter implements CreatorLookupPort {
                 && brandLinkRepository.existsOtherBrandEngagement(creatorId, brandId);
     }
 
+    @Override
+    @Transactional
+    public void flagGiftingExclusion(UUID creatorId, String reason) {
+        creatorRepository.findActiveById(creatorId).ifPresent(creator -> {
+            if (creator.isGiftingExcluded()) {
+                return;
+            }
+            creator.setGiftingExcluded(true);
+            creator.setGiftingExclusionReason(reason);
+            creatorRepository.save(creator);
+            log.info("Creator {} excluded from future gifting: {}", creatorId, reason);
+        });
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isGiftingExcluded(UUID creatorId) {
+        return creatorRepository.findActiveById(creatorId)
+                .map(Creator::isGiftingExcluded)
+                .orElse(false);
+    }
+
     private CreatorContact toContact(Creator creator) {
         String name = creator.getName();
         String firstName = (name != null && !name.isBlank())
@@ -114,5 +139,69 @@ public class CreatorLookupAdapter implements CreatorLookupPort {
                 : creator.getHandle();
         return new CreatorContact(
                 creator.getId(), creator.getEmail(), firstName, name, creator.getHandle());
+    }
+
+    // ------------------------------------------------------------ reporting
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CreatorProfile> profiles(List<UUID> creatorIds) {
+        if (creatorIds == null || creatorIds.isEmpty()) {
+            return List.of();
+        }
+        return creatorRepository.findAllActiveByIds(creatorIds).stream()
+                .map(c -> new CreatorProfile(
+                        c.getId(), c.getHandle(), c.getName(), c.getFollowersCount(),
+                        c.getErPercentage(), c.getUkAudiencePct(), c.getQualityBand(),
+                        c.getPrimaryPlatform(), c.getNiche()))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UUID> creatorsSentTo(UUID brandId, UUID campaignId, LocalDate from, LocalDate to) {
+        if (brandId == null) {
+            return List.of();
+        }
+        return sendHistoryRepository.distinctCreatorsSent(brandId, campaignId, from, to);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<FollowerGrowth> followerGrowth(List<UUID> creatorIds, LocalDate from, LocalDate to) {
+        if (creatorIds == null || creatorIds.isEmpty()) {
+            return List.of();
+        }
+        // Postgres array literal: the projection query takes uuid[] so one round trip covers
+        // every creator instead of one query each.
+        String array = "{" + creatorIds.stream().map(UUID::toString)
+                .collect(java.util.stream.Collectors.joining(",")) + "}";
+
+        return snapshotRepository.growthBetween(array, from, to).stream()
+                .map(row -> {
+                    int start = row.getStartFollowers() == null ? 0 : row.getStartFollowers();
+                    int end = row.getEndFollowers() == null ? 0 : row.getEndFollowers();
+                    return new FollowerGrowth(row.getCreatorId(), start, end, end - start);
+                })
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public void captureFollowerSnapshots() {
+        LocalDate today = LocalDate.now();
+        int captured = 0;
+        for (Creator creator : creatorRepository.findAll()) {
+            if (creator.getDeletedAt() != null) {
+                continue;
+            }
+            if (snapshotRepository.existsByCreatorIdAndCapturedOn(creator.getId(), today)) {
+                continue;
+            }
+            snapshotRepository.save(CreatorFollowerSnapshot.of(
+                    creator.getId(), creator.getFollowersCount(), creator.getErPercentage()));
+            captured++;
+        }
+        log.info("Captured {} follower snapshot(s) for {}", captured, today);
     }
 }

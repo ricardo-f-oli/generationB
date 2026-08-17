@@ -18,6 +18,13 @@ public interface CampaignBoardPort {
     Optional<UUID> findOrCreateBoard(UUID campaignId);
 
     /**
+     * The campaign's display name. Reporting needs it for creator-facing email copy, and taking
+     * it from the database rather than a request parameter keeps client-supplied text out of
+     * outbound mail.
+     */
+    Optional<String> findCampaignName(UUID campaignId);
+
+    /**
      * Adds each creator to the named column of the campaign's board, skipping creators already
      * present. Returns what actually happened.
      */

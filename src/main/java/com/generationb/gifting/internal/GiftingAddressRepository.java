@@ -14,7 +14,21 @@ public interface GiftingAddressRepository extends JpaRepository<GiftingAddress, 
 
     Optional<GiftingAddress> findByCreatorId(UUID creatorId);
 
-    /** Q-G2: resolves "has an address?" for a whole page in one query instead of N. */
-    @Query("SELECT a.creatorId FROM GiftingAddress a WHERE a.creatorId IN :creatorIds")
+    List<GiftingAddress> findAllByCreatorIdIn(List<UUID> creatorIds);
+
+    /** The creator following the emailed link is not signed in, so this is not brand-scoped. */
+    Optional<GiftingAddress> findByCaptureToken(String captureToken);
+
+    /**
+     * Q-G2: resolves "has a usable address?" for a whole page in one query instead of N.
+     * Only rows the creator has actually completed and consented to count.
+     */
+    @Query("""
+        SELECT a.creatorId FROM GiftingAddress a
+        WHERE a.creatorId IN :creatorIds
+          AND a.gdprConsentFlag = true
+          AND a.street IS NOT NULL
+          AND a.postalCode IS NOT NULL
+        """)
     List<UUID> findCreatorIdsWithAddress(@Param("creatorIds") List<UUID> creatorIds);
 }

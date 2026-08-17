@@ -4,6 +4,8 @@ import com.generationb.briefs.*;
 import com.generationb.foundation.ApiException;
 import com.generationb.foundation.Audited;
 import com.generationb.foundation.BrandContext;
+import com.generationb.foundation.BrandLookupPort;
+import com.generationb.foundation.ai.AiClient;
 import com.lowagie.text.Document;
 import com.lowagie.text.Paragraph;
 import com.lowagie.text.pdf.PdfWriter;
@@ -30,13 +32,19 @@ public class BriefService {
     private final BriefRepository briefRepository;
     private final BriefShareRepository briefShareRepository;
     private final BriefMapper briefMapper;
+    private final AiClient aiClient;
+    private final BrandLookupPort brandLookup;
 
-    public BriefService(BriefRepository briefRepository, 
-                        BriefShareRepository briefShareRepository, 
-                        BriefMapper briefMapper) {
+    public BriefService(BriefRepository briefRepository,
+                        BriefShareRepository briefShareRepository,
+                        BriefMapper briefMapper,
+                        AiClient aiClient,
+                        BrandLookupPort brandLookup) {
         this.briefRepository = briefRepository;
         this.briefShareRepository = briefShareRepository;
         this.briefMapper = briefMapper;
+        this.aiClient = aiClient;
+        this.brandLookup = brandLookup;
     }
 
     /**
@@ -98,34 +106,129 @@ public class BriefService {
     }
 
     /**
-     * Generates simulated AI brief content using the campaign inputs.
+     * Requirement #1: turns the campaign inputs into a brief the team can send.
      *
-     * @param briefId the ID of the brief.
-     * @return the brief with simulated AI content populated.
+     * <p>Q-B18: this used to concatenate the inputs back together and call the result "AI
+     * generated". It now goes through {@link AiClient}; if no key is configured it falls back to
+     * the structured assembly below and says so in the document, rather than passing it off.
      */
     @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
     public BriefResponse generateAiBrief(UUID briefId) {
         Brief brief = briefRepository.findByIdAndBrandId(briefId)
-                .orElseThrow(() -> new IllegalArgumentException("Brief not found"));
+                .orElseThrow(() -> ApiException.notFound("Brief"));
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("# AI Generated Campaign Brief: ").append(brief.getCampaignName()).append("\n\n");
-        sb.append("## Campaign Goal\n").append(brief.getCampaignGoal()).append("\n\n");
-        sb.append("## Core Messages\n").append(brief.getKeyMessages()).append("\n\n");
-        sb.append("## Suggested Creative Execution\n");
-        sb.append("- Leverage the ").append(brief.getToneOfVoice()).append(" tone of voice across all content.\n");
-        if (brief.getDeliverables() != null) {
-            sb.append("- Focus deliverables on: ").append(String.join(", ", brief.getDeliverables())).append(".\n\n");
-        }
-        sb.append("## Additional Guidelines\n").append(brief.getAdditionalNotes());
+        String brandName = brandLookup.findBrandName(brief.getBrandId()).orElse("the brand");
+        String generated = aiClient.generate(briefSystemPrompt(), briefUserPrompt(brief, brandName))
+                .orElseGet(() -> structuredBrief(brief, brandName));
 
-        // TODO: Replace the following line with actual integration to OpenAI/Anthropic SDK
-        String generatedContent = sb.toString();
-
-        brief.setAiGeneratedContent(generatedContent);
+        brief.setAiGeneratedContent(generated);
         brief.setStatus(BriefStatus.GENERATED);
         Brief saved = briefRepository.save(brief);
         return briefMapper.toResponse(saved);
+    }
+
+    private String briefSystemPrompt() {
+        return """
+                You write campaign briefs for a UK creator management agency. The reader is a
+                creator deciding whether to take the job, so be concrete about what they have to
+                make and when.
+
+                Return markdown with exactly these headings, in this order:
+                ## The campaign
+                ## What we need from you
+                ## Key messages
+                ## Tone and style
+                ## Timings
+                ## Practical details
+
+                Rules:
+                - British English. No emoji, no exclamation marks, no marketing superlatives.
+                - Under 450 words.
+
+                THE ONE RULE THAT MATTERS: this brief is sent to a creator and they will treat
+                it as the terms of the job. You may only restate facts given to you in the input.
+                You must not invent, infer or give an example of any of the following, even to
+                make the brief look more complete:
+                  - payment terms, invoicing terms or when a fee is paid
+                  - any date, deadline, turnaround time or approval window
+                  - social handles, @mentions, hashtags or tracking links
+                  - usage rights, exclusivity, licensing or contract terms
+                  - deliverables, formats or durations beyond those listed
+                  - anything about the creator's audience or past work
+                Where one of these is missing from the input, write exactly "To be confirmed".
+                A brief that says "To be confirmed" six times is correct; a brief with a
+                plausible invented deadline is a problem for the agency.
+                """;
+    }
+
+    private String briefUserPrompt(Brief brief, String brandName) {
+        StringBuilder prompt = new StringBuilder()
+                .append("Brand: ").append(brandName).append('\n')
+                .append("Campaign: ").append(nz(brief.getCampaignName())).append('\n')
+                .append("Goal: ").append(nz(brief.getCampaignGoal())).append('\n')
+                .append("Key messages: ").append(nz(brief.getKeyMessages())).append('\n')
+                .append("Tone of voice: ").append(brief.getToneOfVoice() == null
+                        ? "not specified" : brief.getToneOfVoice()).append('\n');
+
+        if (brief.getDeliverables() != null && !brief.getDeliverables().isEmpty()) {
+            prompt.append("Deliverables: ").append(String.join(", ", brief.getDeliverables())).append('\n');
+        }
+        prompt.append("Budget: ").append(formatBudget(brief.getBudgetMin(), brief.getBudgetMax())).append('\n');
+        if (brief.getTimelineStart() != null || brief.getTimelineEnd() != null) {
+            prompt.append("Timeline: ")
+                    .append(brief.getTimelineStart() == null ? "TBC" : brief.getTimelineStart())
+                    .append(" to ")
+                    .append(brief.getTimelineEnd() == null ? "TBC" : brief.getTimelineEnd())
+                    .append('\n');
+        }
+        if (brief.getAdditionalNotes() != null && !brief.getAdditionalNotes().isBlank()) {
+            prompt.append("Additional notes: ").append(brief.getAdditionalNotes()).append('\n');
+        }
+        return prompt.toString();
+    }
+
+    /** The deterministic version, used when AI drafting is switched off. */
+    private String structuredBrief(Brief brief, String brandName) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## The campaign\n")
+                .append(brandName).append(" — ").append(nz(brief.getCampaignName())).append("\n\n")
+                .append(nz(brief.getCampaignGoal())).append("\n\n");
+
+        sb.append("## What we need from you\n");
+        if (brief.getDeliverables() != null && !brief.getDeliverables().isEmpty()) {
+            brief.getDeliverables().forEach(d -> sb.append("- ").append(d).append('\n'));
+        } else {
+            sb.append("- To be confirmed\n");
+        }
+        sb.append('\n');
+
+        sb.append("## Key messages\n").append(nz(brief.getKeyMessages())).append("\n\n");
+        sb.append("## Tone and style\n")
+                .append(brief.getToneOfVoice() == null ? "To be confirmed" : brief.getToneOfVoice())
+                .append("\n\n");
+
+        sb.append("## Timings\n")
+                .append(brief.getTimelineStart() == null ? "Start: to be confirmed"
+                        : "Start: " + brief.getTimelineStart())
+                .append('\n')
+                .append(brief.getTimelineEnd() == null ? "End: to be confirmed"
+                        : "End: " + brief.getTimelineEnd())
+                .append("\n\n");
+
+        sb.append("## Practical details\n")
+                .append("Fee: ").append(formatBudget(brief.getBudgetMin(), brief.getBudgetMax()))
+                .append('\n');
+        if (brief.getAdditionalNotes() != null && !brief.getAdditionalNotes().isBlank()) {
+            sb.append(brief.getAdditionalNotes()).append('\n');
+        }
+
+        sb.append("\n_Assembled from the campaign inputs. AI drafting is not switched on for this "
+                + "environment, so this is a structured draft rather than written copy._");
+        return sb.toString();
+    }
+
+    private static String nz(String value) {
+        return value == null || value.isBlank() ? "To be confirmed" : value;
     }
 
     /**

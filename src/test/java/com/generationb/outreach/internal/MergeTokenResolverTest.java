@@ -55,6 +55,40 @@ class MergeTokenResolverTest {
         public boolean hasWorkedWithOtherBrand(UUID creatorId, UUID brandId) {
             return false;
         }
+
+        // --- gifting (#47) ---
+
+        @Override
+        public void flagGiftingExclusion(UUID creatorId, String reason) {
+        }
+
+        @Override
+        public boolean isGiftingExcluded(UUID creatorId) {
+            return false;
+        }
+
+        // --- reporting (#15, #49, #55) ---
+
+        @Override
+        public List<CreatorProfile> profiles(List<UUID> creatorIds) {
+            return List.of();
+        }
+
+        @Override
+        public List<UUID> creatorsSentTo(UUID brandId, UUID campaignId,
+                                         java.time.LocalDate from, java.time.LocalDate to) {
+            return List.of();
+        }
+
+        @Override
+        public List<FollowerGrowth> followerGrowth(List<UUID> creatorIds,
+                                                   java.time.LocalDate from, java.time.LocalDate to) {
+            return List.of();
+        }
+
+        @Override
+        public void captureFollowerSnapshots() {
+        }
     }
 
     private StubCreatorLookup creatorLookup;

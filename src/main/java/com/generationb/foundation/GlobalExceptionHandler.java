@@ -45,7 +45,37 @@ public class GlobalExceptionHandler {
             MethodArgumentTypeMismatchException.class
     })
     public ResponseEntity<ErrorResponse> handleMalformedRequest(Exception ex, WebRequest request) {
-        return build(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "Request could not be read", request, null);
+        // "Request could not be read" told the user nothing — a mistyped date and a corrupt body
+        // produced the same sentence. Name the field when the framework knows it.
+        return build(HttpStatus.BAD_REQUEST, "BAD_REQUEST", describeMalformed(ex), request, null);
+    }
+
+    private String describeMalformed(Exception ex) {
+        if (ex instanceof MissingServletRequestParameterException missing) {
+            return "'" + missing.getParameterName() + "' is required.";
+        }
+        if (ex instanceof MethodArgumentTypeMismatchException mismatch) {
+            return "'" + mismatch.getName() + "' is not in a format we recognise.";
+        }
+        if (ex instanceof HttpMessageNotReadableException) {
+            // The cause carries the offending field for a date, a UUID or an enum.
+            Throwable cause = ex.getCause();
+            if (cause instanceof com.fasterxml.jackson.databind.exc.InvalidFormatException invalid
+                    && !invalid.getPath().isEmpty()) {
+                String field = invalid.getPath().get(invalid.getPath().size() - 1).getFieldName();
+                if (field != null) {
+                    return "'" + field + "' is not in a format we recognise.";
+                }
+            }
+            if (cause instanceof com.fasterxml.jackson.databind.exc.MismatchedInputException mismatched
+                    && !mismatched.getPath().isEmpty()) {
+                String field = mismatched.getPath().get(mismatched.getPath().size() - 1).getFieldName();
+                if (field != null) {
+                    return "'" + field + "' is missing or the wrong type.";
+                }
+            }
+        }
+        return "We could not read that request. Please check the values and try again.";
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

@@ -78,8 +78,10 @@ public class SecurityConfig {
                 .requestMatchers("/api/webhooks/**").permitAll()
                 // Shared brief links.
                 .requestMatchers("/api/briefs/share/**").permitAll()
-                // Q-F17: settings is admin-only.
-                .requestMatchers("/api/settings/**").hasRole("ADMIN")
+                // Q-F17: settings is admin-only. The audit trail (requirement #36) is the one
+                // exception — a director may read it — so the fine-grained rule lives on the
+                // service methods and this gate keeps out everyone below director.
+                .requestMatchers("/api/settings/**").hasAnyRole("ADMIN", "DIRECTOR")
                 .anyRequest().authenticated()
             )
             // Q-A6: without an entry point Spring answers 403 for anonymous requests, and the

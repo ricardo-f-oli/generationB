@@ -61,11 +61,16 @@ jwt:
 
 # Q-B18/Q-B19: Groq is the LLM provider (free tier, OpenAI-compatible API).
 # Without a key the services fall back to a deterministic local draft rather than failing.
+#
+# The model id is verified against this account's /v1/models — llama-3.3-70b-versatile was
+# configured here previously and does not exist on it, which is the same failure mode as the
+# old hard-coded claude-sonnet-4-6. If Groq retires this id, GET /v1/models lists the current
+# ones and AI_MODEL overrides it without a redeploy.
 ai:
   provider: groq
   base-url: ${AI_BASE_URL:https://api.groq.com/openai/v1}
   api-key: ${GROQ_API_KEY:}
-  model: ${AI_MODEL:llama-3.3-70b-versatile}
+  model: ${AI_MODEL:openai/gpt-oss-120b}
   timeout-seconds: ${AI_TIMEOUT_SECONDS:20}
   max-tokens: ${AI_MAX_TOKENS:1200}
 

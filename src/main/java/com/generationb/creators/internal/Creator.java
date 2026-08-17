@@ -94,6 +94,16 @@ public class Creator {
     @Column(name = "anonymised_at")
     private Instant anonymisedAt;
 
+    /**
+     * Requirement #47: set when a creator refuses a gift or a parcel comes back, so they are
+     * excluded from future gifting selections until someone clears the flag.
+     */
+    @Column(name = "gifting_excluded", nullable = false)
+    private boolean giftingExcluded = false;
+
+    @Column(name = "gifting_exclusion_reason")
+    private String giftingExclusionReason;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

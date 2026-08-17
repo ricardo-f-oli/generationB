@@ -43,4 +43,45 @@ public interface CreatorLookupPort {
 
     /** Requirement #19: cross-brand duplicate flag when adding a creator to a new list. */
     boolean hasWorkedWithOtherBrand(UUID creatorId, UUID brandId);
+
+    // -------------------------------------------------------------- gifting
+
+    /**
+     * Requirement #47: a refusal or a returned parcel excludes the creator from future gifting.
+     * The flag is global rather than per-brand — a creator who has asked not to be sent product
+     * should not be sent it by a sister brand either.
+     */
+    void flagGiftingExclusion(UUID creatorId, String reason);
+
+    boolean isGiftingExcluded(UUID creatorId);
+
+    // ------------------------------------------------------------ reporting
+
+    /** Enough of a creator profile for a report row and a KPI comparison (#49, #55). */
+    record CreatorProfile(
+        UUID creatorId,
+        String handle,
+        String name,
+        Integer followersCount,
+        java.math.BigDecimal erPercentage,
+        java.math.BigDecimal ukAudiencePct,
+        String qualityBand,
+        String primaryPlatform,
+        String niche
+    ) {}
+
+    /** Requirement #49: follower growth needs two points in time, not one mutable number. */
+    record FollowerGrowth(UUID creatorId, int startFollowers, int endFollowers, int delta) {}
+
+    List<CreatorProfile> profiles(List<UUID> creatorIds);
+
+    /** Requirement #15: which creators this brand actually sent to in the window. */
+    List<UUID> creatorsSentTo(UUID brandId, UUID campaignId,
+                              java.time.LocalDate from, java.time.LocalDate to);
+
+    List<FollowerGrowth> followerGrowth(List<UUID> creatorIds,
+                                        java.time.LocalDate from, java.time.LocalDate to);
+
+    /** Records today's follower count so growth can be measured later. */
+    void captureFollowerSnapshots();
 }

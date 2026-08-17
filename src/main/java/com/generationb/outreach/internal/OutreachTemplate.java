@@ -5,6 +5,8 @@ import com.generationb.outreach.OutreachType;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.util.UUID;
 
@@ -27,6 +29,11 @@ public class OutreachTemplate extends BaseEntity {
     @Column(name = "body_template", nullable = false)
     private String bodyTemplate;
 
+    /**
+     * Same fix as {@code AuditLog}: without the JSON type code Hibernate binds this as varchar
+     * and Postgres refuses the insert, so creating any template failed at commit.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "supported_tokens", columnDefinition = "jsonb")
     private String supportedTokens;
 

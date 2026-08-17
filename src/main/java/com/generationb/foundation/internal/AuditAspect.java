@@ -159,6 +159,18 @@ public class AuditAspect {
                 return Class.forName("com.generationb.outreach.internal.OutreachTemplate");
             } else if (serviceName.contains("OutreachCampaignService")) {
                 return Class.forName("com.generationb.outreach.internal.OutreachCampaign");
+            } else if (serviceName.contains("GiftingService")) {
+                // Requirement #44 and #53 both need "who signed this off?" to be answerable.
+                if (methodName.contains("CompSlip")) {
+                    return Class.forName("com.generationb.gifting.internal.GiftingRun");
+                } else if (methodName.contains("BrandOrder")) {
+                    return Class.forName("com.generationb.gifting.internal.BrandOrder");
+                } else if (methodName.contains("Dispatch")) {
+                    return Class.forName("com.generationb.gifting.internal.Dispatch");
+                }
+                return null;
+            } else if (serviceName.contains("ReportService")) {
+                return Class.forName("com.generationb.reporting.internal.Report");
             }
         } catch (ClassNotFoundException ignored) {}
         return null;

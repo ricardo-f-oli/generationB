@@ -2,17 +2,15 @@ package com.generationb.outreach.internal;
 
 import com.generationb.foundation.Audited;
 import com.generationb.foundation.BrandContext;
+import com.generationb.foundation.BrandLookupPort;
+import com.generationb.foundation.ai.AiClient;
 import com.generationb.outreach.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestClient;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -26,14 +24,15 @@ public class OutreachTemplateService {
     private static final Logger log = LoggerFactory.getLogger(OutreachTemplateService.class);
 
     private final OutreachTemplateRepository templateRepository;
-    private final RestClient restClient;
+    private final AiClient aiClient;
+    private final BrandLookupPort brandLookup;
 
-    @Value("${anthropic.api-key:MOCK_KEY}")
-    private String anthropicApiKey;
-
-    public OutreachTemplateService(OutreachTemplateRepository templateRepository) {
+    public OutreachTemplateService(OutreachTemplateRepository templateRepository,
+                                   AiClient aiClient,
+                                   BrandLookupPort brandLookup) {
         this.templateRepository = templateRepository;
-        this.restClient = RestClient.builder().build();
+        this.aiClient = aiClient;
+        this.brandLookup = brandLookup;
     }
 
     /**
@@ -100,59 +99,95 @@ public class OutreachTemplateService {
     }
 
     /**
-     * Generates an outreach template using Anthropic Claude.
+     * Requirement #32: drafts an outreach email.
+     *
+     * <p>Q-B18: the old version posted to Anthropic with a model id that does not exist, caught
+     * the failure, and saved the two-line fallback — so "AI generated" templates were never
+     * generated. It now goes through {@link AiClient}, and the fallback is a usable template
+     * rather than a stub.
      */
     public TemplateResponse generateAiTemplate(GenerateAiTemplateCommand command) {
-        String systemPrompt = "You are an outreach specialist for a UK creator management agency. Generate a professional, friendly outreach email template for the given type and brand context. Use tokens {first_name}, {handle}, {brand} where appropriate. Return only the email body, no subject line.";
-        String userPrompt = String.format("Outreach Type: %s, Brand Name: %s, Campaign Context: %s, Tone: %s",
-            command.type(), command.brandName(), command.campaignContext(), command.tone());
+        UUID brandId = BrandContext.getCurrentBrandId();
+        BrandLookupPort.BrandProfile profile = brandId == null
+                ? null : brandLookup.findProfile(brandId).orElse(null);
 
-        String generatedBody;
-        try {
-            // TODO: Swap Anthropic claude-sonnet-4-6 model or endpoint as required
-            Map<String, Object> requestBody = Map.of(
-                "model", "claude-sonnet-4-6",
-                "max_tokens", 1000,
-                "system", systemPrompt,
-                "messages", List.of(Map.of("role", "user", "content", userPrompt))
-            );
+        String brandName = firstNonBlank(command.brandName(),
+                profile == null ? null : profile.name(), "{brand}");
+        String tone = firstNonBlank(command.tone(),
+                profile == null ? null : profile.toneOfVoice(), "warm and professional");
 
-            Map response = restClient.post()
-                .uri("https://api.anthropic.com/v1/messages")
-                .header("x-api-key", anthropicApiKey)
-                .header("anthropic-version", "2023-06-01")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(requestBody)
-                .retrieve()
-                .body(Map.class);
+        String systemPrompt = """
+                You write outreach emails for a UK creator management agency.
+                Rules:
+                - British English, no exclamation marks, no emoji.
+                - Keep it under 150 words.
+                - Use the merge tokens {first_name}, {handle} and {brand} where a real value belongs.
+                - Never promise or imply a fee, a payment, a rate, a deadline, an exclusivity
+                  period or any other commercial term. You have not been told them, and this
+                  email goes to a creator in the agency's name. Say the details will follow.
+                - Do not invent facts about the creator's audience or past work.
+                - Return the email body only: no subject line, no sign-off block, no commentary.
+                """;
 
-            if (response != null && response.containsKey("content")) {
-                List contentList = (List) response.get("content");
-                if (!contentList.isEmpty()) {
-                    Map firstContent = (Map) contentList.get(0);
-                    generatedBody = (String) firstContent.get("text");
-                } else {
-                    generatedBody = "Hi {first_name},\n\nWe would love to collaborate with {handle} for {brand}!";
-                }
-            } else {
-                generatedBody = "Hi {first_name},\n\nWe would love to collaborate with {handle} for {brand}!";
-            }
-        } catch (Exception e) {
-            log.warn("Anthropic API call failed, falling back to default template. Error: {}", e.getMessage());
-            generatedBody = "Hi {first_name},\n\nWe would love to collaborate with {handle} for {brand}!";
+        StringBuilder userPrompt = new StringBuilder()
+                .append("Outreach type: ").append(command.type()).append('\n')
+                .append("Brand: ").append(brandName).append('\n')
+                .append("Tone of voice: ").append(tone).append('\n');
+        if (notBlank(command.campaignContext())) {
+            userPrompt.append("Campaign context: ").append(command.campaignContext()).append('\n');
+        }
+        if (profile != null && notBlank(profile.brandGuidelines())) {
+            userPrompt.append("Brand guidelines: ").append(profile.brandGuidelines()).append('\n');
         }
 
+        String generatedBody = aiClient.generate(systemPrompt, userPrompt.toString())
+                .orElseGet(() -> {
+                    log.info("AI drafting unavailable; using the standard {} template", command.type());
+                    return fallbackBody(command.type(), brandName, command.campaignContext());
+                });
+
         OutreachTemplate template = new OutreachTemplate();
-        template.setName("AI Generated - " + command.type());
+        template.setName(brandName + " · " + command.type());
         template.setType(command.type());
-        template.setBrandId(BrandContext.getCurrentBrandId());
-        template.setSubjectTemplate("Collaboration Opportunity with " + (command.brandName() != null ? command.brandName() : "{brand}"));
+        template.setBrandId(brandId);
+        template.setSubjectTemplate("Collaboration with " + brandName);
         template.setBodyTemplate(generatedBody);
         template.setAiGenerated(true);
         template.setCreatedBy(BrandContext.getCurrentUserId());
 
         OutreachTemplate saved = templateRepository.save(template);
         return mapToResponse(saved);
+    }
+
+    /** Used verbatim when there is no AI key; it has to read as a finished email, not a stub. */
+    private String fallbackBody(OutreachType type, String brandName, String context) {
+        String opening = switch (type) {
+            case GIFTING_CONFIRMATION -> "We have something we would love to send you.";
+            case FOLLOW_UP -> "Just circling back on my last note.";
+            case RE_ENGAGEMENT -> "It has been a while since we last worked together.";
+            case INITIAL_OUTREACH -> "We are working with " + brandName
+                    + " and would love to collaborate.";
+        };
+        return "Hi {first_name},\n\n"
+                + opening + "\n\n"
+                + "I look after creator partnerships for " + brandName + ", and {handle} felt like "
+                + "a natural fit for what we have coming up"
+                + (notBlank(context) ? " — " + context : "") + ".\n\n"
+                + "If you are interested, reply here and I will send the details across.\n\n"
+                + "Best wishes";
+    }
+
+    private static boolean notBlank(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (notBlank(value)) {
+                return value.trim();
+            }
+        }
+        return "";
     }
 
     private TemplateResponse mapToResponse(OutreachTemplate template) {
