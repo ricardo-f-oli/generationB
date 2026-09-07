@@ -6,20 +6,20 @@ import com.generationb.foundation.Audited;
 import com.generationb.foundation.BrandContext;
 import com.generationb.foundation.BrandLookupPort;
 import com.generationb.foundation.ai.AiClient;
-import com.lowagie.text.Document;
-import com.lowagie.text.Paragraph;
-import com.lowagie.text.pdf.PdfWriter;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.ByteArrayOutputStream;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Service handling campaign briefs workflow, generation, and sharing.
@@ -34,17 +34,26 @@ public class BriefService {
     private final BriefMapper briefMapper;
     private final AiClient aiClient;
     private final BrandLookupPort brandLookup;
+    private final BriefClauseRepository briefClauseRepository;
+    private final ContractClauseService clauseService;
+    private final BriefPdfRenderer pdfRenderer;
 
     public BriefService(BriefRepository briefRepository,
                         BriefShareRepository briefShareRepository,
                         BriefMapper briefMapper,
                         AiClient aiClient,
-                        BrandLookupPort brandLookup) {
+                        BrandLookupPort brandLookup,
+                        BriefClauseRepository briefClauseRepository,
+                        ContractClauseService clauseService,
+                        BriefPdfRenderer pdfRenderer) {
         this.briefRepository = briefRepository;
         this.briefShareRepository = briefShareRepository;
         this.briefMapper = briefMapper;
         this.aiClient = aiClient;
         this.brandLookup = brandLookup;
+        this.briefClauseRepository = briefClauseRepository;
+        this.clauseService = clauseService;
+        this.pdfRenderer = pdfRenderer;
     }
 
     /**
@@ -240,29 +249,100 @@ public class BriefService {
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
     public byte[] exportBriefAsPdf(UUID briefId) {
-        Brief brief = briefRepository.findByIdAndBrandId(briefId)
-                .orElseThrow(() -> new IllegalArgumentException("Brief not found"));
+        Brief brief = requireBrief(briefId);
 
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        Document document = new Document();
-        try {
-            PdfWriter.getInstance(document, baos);
-            document.open();
+        // Requirements #2 and #3: a designed document, with the clauses attached to this brief
+        // printed as its terms. Layout lives in the renderer; this method only gathers.
+        String brandName = brandLookup.findBrandName(BrandContext.requireBrandId())
+                .orElse("Generation B");
+        return pdfRenderer.render(brief, brandName, listBriefClauses(briefId));
+    }
 
-            document.add(new Paragraph("Campaign Brief: " + brief.getCampaignName()));
-            document.add(new Paragraph("Goal: " + brief.getCampaignGoal()));
-            document.add(new Paragraph("Key Messages: " + brief.getKeyMessages()));
-            document.add(new Paragraph("Tone of Voice: " + brief.getToneOfVoice()));
-            document.add(new Paragraph("Budget: " + formatBudget(brief.getBudgetMin(), brief.getBudgetMax())));
-            if (brief.getAiGeneratedContent() != null) {
-                document.add(new Paragraph("\nAI Generated Details:\n" + brief.getAiGeneratedContent()));
-            }
+    // =====================================================================
+    // Requirement #3: clauses attached to a brief
+    // =====================================================================
 
-            document.close();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to generate brief PDF", e);
+    /** The clauses on this brief, in the order chosen for it. */
+    @Transactional(readOnly = true)
+    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
+    public List<ContractClauseResponse> listBriefClauses(UUID briefId) {
+        requireBrief(briefId);
+        List<UUID> clauseIds = briefClauseRepository.findByBriefIdOrderByDisplayOrderAsc(briefId)
+                .stream().map(BriefClause::getClauseId).toList();
+        if (clauseIds.isEmpty()) {
+            return List.of();
         }
-        return baos.toByteArray();
+
+        // Read through the library rather than storing a copy of the text: a clause edited
+        // centrally because the agency's legal position changed should reach every brief that
+        // has not gone out yet.
+        Map<UUID, ContractClauseResponse> byId = clauseService.listClauses().stream()
+                .collect(Collectors.toMap(ContractClauseResponse::id, response -> response,
+                        (a, b) -> a));
+
+        return clauseIds.stream().map(byId::get).filter(Objects::nonNull).toList();
+    }
+
+    @Transactional
+    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
+    public List<ContractClauseResponse> attachClause(UUID briefId, UUID clauseId) {
+        requireBrief(briefId);
+
+        // The clause must belong to this brand. listClauses() is already brand-scoped, so
+        // checking membership here is what stops a guessed id pulling another brand's contract
+        // terms into this brief.
+        if (clauseService.listClauses().stream().noneMatch(c -> c.id().equals(clauseId))) {
+            throw ApiException.notFound("Contract clause");
+        }
+        if (briefClauseRepository.existsByBriefIdAndClauseId(briefId, clauseId)) {
+            return listBriefClauses(briefId);
+        }
+
+        briefClauseRepository.save(new BriefClause(
+                briefId, clauseId, briefClauseRepository.nextDisplayOrder(briefId)));
+        return listBriefClauses(briefId);
+    }
+
+    @Transactional
+    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
+    public List<ContractClauseResponse> detachClause(UUID briefId, UUID clauseId) {
+        requireBrief(briefId);
+        briefClauseRepository.detach(briefId, clauseId);
+        return listBriefClauses(briefId);
+    }
+
+    /**
+     * Replaces the whole set in one call, which is what a reorder actually is.
+     *
+     * <p>Order matters in a contract — a liability clause printed after the signature block
+     * reads differently from one before it — so the sequence sent is the sequence stored.
+     */
+    @Transactional
+    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
+    public List<ContractClauseResponse> setBriefClauses(UUID briefId, List<UUID> clauseIds) {
+        requireBrief(briefId);
+        Set<UUID> allowed = clauseService.listClauses().stream()
+                .map(ContractClauseResponse::id)
+                .collect(Collectors.toSet());
+
+        List<UUID> requested = clauseIds == null ? List.<UUID>of()
+                : clauseIds.stream().distinct().toList();
+        for (UUID clauseId : requested) {
+            if (!allowed.contains(clauseId)) {
+                throw ApiException.notFound("Contract clause");
+            }
+        }
+
+        briefClauseRepository.detachAll(briefId);
+        for (int order = 0; order < requested.size(); order++) {
+            briefClauseRepository.save(new BriefClause(briefId, requested.get(order), order));
+        }
+        return listBriefClauses(briefId);
+    }
+
+    private Brief requireBrief(UUID briefId) {
+        return briefRepository.findByIdAndBrandId(briefId)
+                .orElseThrow(() -> ApiException.notFound("Brief"));
     }
 
     /**

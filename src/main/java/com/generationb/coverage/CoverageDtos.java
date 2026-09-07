@@ -23,7 +23,8 @@ public final class CoverageDtos {
             String contentForm,
             String url,
             String caption,
-            long views,
+            /** Null where the platform publishes no view count — Instagram never does. Not zero. */
+            Long views,
             long likes,
             long comments,
             Long shares,

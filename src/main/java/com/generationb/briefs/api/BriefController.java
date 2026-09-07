@@ -69,6 +69,37 @@ public class BriefController {
         return new ResponseEntity<>(pdfBytes, headers, HttpStatus.OK);
     }
 
+    // ------------------------------------------- clauses on a brief (#3)
+
+    /** The clauses attached to this brief, in the order they will print. */
+    @GetMapping("/{id}/clauses")
+    public ApiResponse<List<ContractClauseResponse>> listBriefClauses(@PathVariable UUID id) {
+        return ApiResponse.of(briefService.listBriefClauses(id));
+    }
+
+    @PostMapping("/{id}/clauses/{clauseId}")
+    public ApiResponse<List<ContractClauseResponse>> attachClause(@PathVariable UUID id,
+                                                                  @PathVariable UUID clauseId) {
+        return ApiResponse.of(briefService.attachClause(id, clauseId));
+    }
+
+    @DeleteMapping("/{id}/clauses/{clauseId}")
+    public ApiResponse<List<ContractClauseResponse>> detachClause(@PathVariable UUID id,
+                                                                  @PathVariable UUID clauseId) {
+        return ApiResponse.of(briefService.detachClause(id, clauseId));
+    }
+
+    /**
+     * Replaces the set in one call, which is how a reorder arrives. Order is contractual: a
+     * liability clause after the signature block reads differently from one before it.
+     */
+    @PutMapping("/{id}/clauses")
+    public ApiResponse<List<ContractClauseResponse>> setBriefClauses(
+            @PathVariable UUID id,
+            @RequestBody List<UUID> clauseIds) {
+        return ApiResponse.of(briefService.setBriefClauses(id, clauseIds));
+    }
+
     @GetMapping("/{id}/share-link")
     public ApiResponse<Map<String, String>> getSharedBriefLink(@PathVariable UUID id) {
         String link = briefService.getSharedBriefLink(id);

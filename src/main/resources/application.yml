@@ -74,15 +74,137 @@ ai:
   timeout-seconds: ${AI_TIMEOUT_SECONDS:20}
   max-tokens: ${AI_MAX_TOKENS:1200}
 
+# The creator-data vendor. This is what unblocks requirements #10, #11, #25 and #26 — the
+# auto-clipping pipeline, hashtag and competitor mention discovery, and audience demographics.
+#
+# ONE variable is enough: set MODASH_API_KEY and the vendor is used.
+#
+# INSIGHTS_PROVIDER only exists to override that. Leave it unset in normal operation; set it to
+# `mock` to hold a live key without using it yet, or to `modash` to be explicit. It used to be
+# required alongside the key, and forgetting it left production quietly running on generated
+# data with nothing on screen looking wrong — a bad trade for a switch used about once.
+#
+# Costs, from the vendor's own docs and confirmed against this account:
+#   /raw/*                         1 raw request   — post feeds, used by auto-clipping
+#   /{platform}/users              free            — handle lookup
+#   /{platform}/profile/*/report   1 credit        — audience demographics
+#   /ai/{platform}/text-search     0.025/profile   — natural-language search
+# A trial account carries 100 of each, so a careless loop is a real risk. ModashClient refuses
+# any metered call that would take the balance below the reserve.
+insights:
+  # Empty means "decide from whether a key is present" — see InsightsProviderCondition.
+  provider: ${INSIGHTS_PROVIDER:}
+  modash:
+    api-key: ${MODASH_API_KEY:}
+    base-url: ${MODASH_BASE_URL:https://api.modash.io/v1}
+    timeout-seconds: ${MODASH_TIMEOUT_SECONDS:25}
+    # The documented limit is 2 requests/second on both allowances.
+    min-request-interval-ms: ${MODASH_MIN_INTERVAL_MS:550}
+    max-retries: ${MODASH_MAX_RETRIES:2}
+    # Never spend the account to zero: a report someone is waiting on in a meeting should still
+    # run after a bulk job has been careless.
+    credit-reserve: ${MODASH_CREDIT_RESERVE:2}
+    raw-reserve: ${MODASH_RAW_RESERVE:2}
+    budget-ttl-seconds: ${MODASH_BUDGET_TTL_SECONDS:120}
+  enrichment:
+    # Audience demographics move over months. Re-buying a report inside this window is waste.
+    ttl-days: ${INSIGHTS_TTL_DAYS:30}
+    # The hard ceiling on one bulk refresh, whatever limit the caller asks for.
+    max-batch: ${INSIGHTS_MAX_BATCH:25}
+
+# Requirement #5 and the asset exports. Cloudflare R2 is S3-compatible with a free tier and
+# no egress fees, which matters because this stores campaign video.
+#
+# Unset means "local", so a fresh clone can upload a file without an R2 account. The prod
+# profile overrides it — an ephemeral container disk is not storage.
+storage:
+  provider: ${STORAGE_PROVIDER:local}
+  local-path: ${STORAGE_LOCAL_PATH:./data/uploads}
+  endpoint: ${STORAGE_ENDPOINT:}
+  bucket: ${STORAGE_BUCKET:generationb}
+  access-key: ${STORAGE_ACCESS_KEY:}
+  secret-key: ${STORAGE_SECRET_KEY:}
+  region: ${STORAGE_REGION:auto}
+
+# Multipart limits mirror StorageKeys.MAX_BYTES. Spring rejects an oversized upload before it
+# reaches the controller, so a 2GB POST cannot exhaust the free tier's 512MB of memory.
+spring.servlet.multipart:
+  max-file-size: 25MB
+  max-request-size: 30MB
+
 outreach:
   sendgrid:
     api-key: ${OUTREACH_SENDGRID_API_KEY:}
     from-address: ${OUTREACH_FROM_ADDRESS:noreply@btheagency.com}
     from-name: ${OUTREACH_FROM_NAME:B. The Agency}
     reply-domain: ${OUTREACH_REPLY_DOMAIN:reply.btheagency.com}
+
+    # Requirement #30. The event webhook is permitAll — SendGrid cannot log in — so the
+    # signature is the only thing between a stranger and the ability to mark a creator as
+    # having replied, or file a spam report that suppresses them across every brand.
+    #
+    # Copy this from SendGrid > Settings > Mail Settings > Event Webhook, after switching on
+    # "Signed Event Webhook Requests". Without it every call is REJECTED, deliberately: the
+    # previous behaviour accepted anything and looked like it was working.
     webhook-public-key: ${SENDGRID_WEBHOOK_PUBLIC_KEY:}
+    # How far out of step with SendGrid's clock a request may be, in seconds. Survives a retry
+    # and some drift; short enough that a captured request is not replayable tomorrow.
+    webhook-tolerance-seconds: ${SENDGRID_WEBHOOK_TOLERANCE_SECONDS:600}
+    # Local development only. Logs a warning on every call it lets through.
+    webhook-allow-unsigned: ${SENDGRID_WEBHOOK_ALLOW_UNSIGNED:false}
+
+    # Inbound Parse is not signed by SendGrid — they offer no signature on it — so the
+    # endpoint is protected by an unguessable path segment instead:
+    #   https://<host>/api/webhooks/sendgrid/inbound/<this value>
+    # Generate with `openssl rand -hex 32`. Empty means the endpoint stays closed.
+    inbound-token: ${OUTREACH_SENDGRID_INBOUND_TOKEN:}
+
+    # Where a creator's reply goes if the campaign's owner has no email on file. Replies are
+    # stored either way; without this the notification is what is lost.
+    reply-fallback-address: ${OUTREACH_REPLY_FALLBACK_ADDRESS:}
   follow-up:
     default-window-days: ${FOLLOW_UP_WINDOW_DAYS:7}
+
+# Requirement #40. Product liability cover belongs to the brand whose product is being posted to
+# a stranger's home, so it is recorded per brand and dispatch is refused without it. Turning this
+# off makes the recorded policy decorative, which is the state the requirement was in before.
+gifting:
+  require-product-liability: ${GIFTING_REQUIRE_PRODUCT_LIABILITY:true}
+
+# Requirement #37: GDPR storage limitation. Each module declares its own policy in a
+# RetentionSweeper; these are the windows those policies read. The nightly pass runs at 03:00
+# Europe/London and writes an evidence row per dataset to retention_runs.
+#
+# Changing a window here changes what the GDPR screen says, because the screen renders the
+# policy text the sweepers generate rather than a separate copy that would drift.
+retention:
+  # Off switch that leaves previews working — useful on a restored copy of production, where
+  # a real sweep would delete data that still exists in the live system.
+  enabled: ${RETENTION_ENABLED:true}
+  gifting-address:
+    # Home addresses. Purpose is spent once the parcel arrives or comes back.
+    delivered-days: ${RETENTION_ADDRESS_DELIVERED_DAYS:90}
+    unused-days: ${RETENTION_ADDRESS_UNUSED_DAYS:180}
+  waitlist:
+    # Double opt-in never completed means no consent, so there is no basis to keep the address.
+    unconfirmed-days: ${RETENTION_WAITLIST_DAYS:30}
+  email-threads:
+    months: ${RETENTION_EMAIL_MONTHS:24}
+  audit-log:
+    months: ${RETENTION_AUDIT_MONTHS:24}
+  login-attempts:
+    days: ${RETENTION_LOGIN_ATTEMPT_DAYS:90}
+  expired-tokens:
+    days: ${RETENTION_EXPIRED_TOKEN_DAYS:7}
+  creator-review:
+    # Flagged for a human decision, never deleted automatically. Three years rather than the
+    # usual two: agency relationships are seasonal, and a creator used one Christmas is
+    # plausibly used the next but one.
+    months: ${RETENTION_CREATOR_REVIEW_MONTHS:36}
+    max-listed: ${RETENTION_CREATOR_REVIEW_MAX:100}
+  run-log:
+    # The evidence has to outlive every dataset it reports on.
+    years: ${RETENTION_RUN_LOG_YEARS:6}
 
 resend:
   api-key: ${RESEND_API_KEY:}

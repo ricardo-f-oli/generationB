@@ -45,7 +45,11 @@ public class BrandLookupAdapter implements BrandLookupPort {
                 brand.getInstagramHandle(),
                 brand.getMonitoredHashtags(),
                 brand.getReplyToEmail(),
-                brand.getFromName()
+                brand.getFromName(),
+                brand.getProductLiabilityExpiresOn(),
+                brand.getProductLiabilityInsurer(),
+                brand.getProductLiabilityCoverGbp(),
+                brand.getGiftingDisclaimer()
         );
     }
 }

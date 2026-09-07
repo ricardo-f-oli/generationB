@@ -209,6 +209,13 @@ public class CreatorService {
         creator.setPortfolioUrl(trimToNull(command.portfolio()));
         creator.setOptInStatus("PENDING_REVIEW");
         creator.setOptInStep(5);
+
+        // Requirement #20: each answer stored as given. The previous code recorded consent for
+        // storage and marketing whatever the creator actually ticked.
+        creator.setConsentMarketingEmail(command.consentMarketingEmail());
+        creator.setConsentGiftingAddress(command.consentGiftingAddress());
+        creator.setConsentBrandSharing(command.consentBrandSharing());
+        creator.setConsentContentReuse(command.consentContentReuse());
         if (command.er() != null && !command.er().isBlank()) {
             try {
                 creator.setErPercentage(new BigDecimal(command.er().replace("%", "").trim()));
@@ -485,6 +492,8 @@ public class CreatorService {
                 creator.getAudienceAgeBand(),
                 creator.getAudienceGenderSplit(),
                 creator.getQualityBand(),
+                creator.getInsightsSource(),
+                creator.getInsightsRefreshedAt(),
                 creator.getOptInStatus(),
                 tags,
                 engagements,
@@ -523,10 +532,18 @@ public class CreatorService {
         );
     }
 
+    /**
+     * Locale.UK is explicit because {@code String.format} without one follows the JVM default,
+     * and on a European default 8,664,673 renders as "8,7M" — a comma decimal separator in a
+     * figure a UK agency puts in front of a client.
+     */
     static String formatFollowers(Integer count) {
         if (count == null) return "0";
-        if (count >= 1_000_000) return String.format("%.1fM", count / 1_000_000.0).replace(".0M", "M");
-        if (count >= 1_000) return String.format("%.0fK", count / 1_000.0);
+        if (count >= 1_000_000) {
+            return String.format(java.util.Locale.UK, "%.1fM", count / 1_000_000.0)
+                    .replace(".0M", "M");
+        }
+        if (count >= 1_000) return String.format(java.util.Locale.UK, "%.0fK", count / 1_000.0);
         return String.valueOf(count);
     }
 

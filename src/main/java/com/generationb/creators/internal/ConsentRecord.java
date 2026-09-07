@@ -24,6 +24,10 @@ public class ConsentRecord {
     public static final String DATA_STORAGE = "DATA_STORAGE";
     public static final String GIFTING_ADDRESS = "GIFTING_ADDRESS";
 
+    /** Requirement #20: the two purposes that involve a third party seeing personal data. */
+    public static final String BRAND_SHARING = "BRAND_SHARING";
+    public static final String CONTENT_REUSE = "CONTENT_REUSE";
+
     public static final String CONSENT = "CONSENT";
     public static final String LEGITIMATE_INTEREST = "LEGITIMATE_INTEREST";
 

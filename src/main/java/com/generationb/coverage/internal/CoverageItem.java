@@ -57,8 +57,13 @@ public class CoverageItem extends BaseEntity {
     @Column(name = "external_id")
     private String externalId;
 
-    @Column(name = "views", nullable = false)
-    private Long views = 0L;
+    /**
+     * NULL means the platform does not publish a view count for this post. Instagram never does,
+     * on any post type. It is not a synonym for zero, and a report prints "Not tracked" for it —
+     * the same treatment {@code impressions} already had.
+     */
+    @Column(name = "views")
+    private Long views;
 
     @Column(name = "likes", nullable = false)
     private Long likes = 0L;

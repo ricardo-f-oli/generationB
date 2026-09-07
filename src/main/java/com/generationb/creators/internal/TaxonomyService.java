@@ -118,11 +118,20 @@ public class TaxonomyService {
             throw ApiException.conflict("An attribute with that key already exists");
         });
 
+        // Requirement #16: reject an unsupported type here rather than discovering it when
+        // somebody tries to store a value against it.
+        AttributeType attributeType = AttributeType.require(type);
+        if (attributeType.needsOptions() && (options == null || options.isEmpty())) {
+            throw ApiException.badRequest(
+                    "A " + attributeType.name().toLowerCase().replace('_', ' ')
+                            + " attribute needs at least one option to choose from.");
+        }
+
         CustomAttributeDefinition definition = new CustomAttributeDefinition();
         definition.setBrandId(brandId);
         definition.setAttributeKey(normalisedKey);
         definition.setLabel(label.trim());
-        definition.setAttributeType(type != null ? type.toUpperCase() : "STRING");
+        definition.setAttributeType(attributeType.name());
         definition.setOptions(options);
         definition.setRequired(required);
         definition.setDisplayOrder((int) definitionRepository.findActiveForBrand(brandId).size());
@@ -159,6 +168,16 @@ public class TaxonomyService {
         creatorRepository.findActiveById(creatorId)
                 .orElseThrow(() -> ApiException.notFound("Creator"));
 
+        // Requirement #16: the type on the definition is now enforced rather than decorative.
+        // Values are stored as text, so this is the only thing standing between a "Birthday"
+        // attribute and the string "next Tuesday" — which nothing downstream can sort or filter.
+        //
+        // Normalising as well as validating matters as much: a date typed 03/04/2026 and one
+        // pasted as 2026-04-03 have to land in the column identically or they sort apart.
+        String normalised = AttributeType.of(definition.getAttributeType())
+                .normalise(value, definition.getOptions(), definition.isRequired(),
+                        definition.getLabel());
+
         CreatorCustomAttribute attribute = valueRepository
                 .findByCreatorIdAndDefinitionId(creatorId, definitionId)
                 .orElseGet(() -> {
@@ -170,7 +189,8 @@ public class TaxonomyService {
                     created.setAttributeType(definition.getAttributeType());
                     return created;
                 });
-        attribute.setAttributeValue(value);
+        attribute.setAttributeType(definition.getAttributeType());
+        attribute.setAttributeValue(normalised);
         valueRepository.save(attribute);
     }
 }

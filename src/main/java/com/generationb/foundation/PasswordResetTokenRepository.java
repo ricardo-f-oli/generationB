@@ -26,4 +26,8 @@ public interface PasswordResetTokenRepository extends JpaRepository<PasswordRese
     @Modifying
     @Query("DELETE FROM PasswordResetToken t WHERE t.expiresAt < :cutoff")
     int deleteExpiredBefore(@Param("cutoff") Instant cutoff);
+
+    /** Requirement #37: the dry-run count behind the same delete, for the GDPR screen. */
+    @Query("SELECT COUNT(t) FROM PasswordResetToken t WHERE t.expiresAt < :cutoff")
+    int countExpiredBefore(@Param("cutoff") Instant cutoff);
 }

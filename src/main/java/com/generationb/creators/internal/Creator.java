@@ -84,6 +84,40 @@ public class Creator {
     @Column(name = "quality_band")
     private String qualityBand;
 
+    /**
+     * Where the four fields above came from: {@code MODASH}, or null when a person typed them.
+     * Without this a reader cannot tell a measured figure from a guess someone made in 2024.
+     */
+    @Column(name = "insights_source")
+    private String insightsSource;
+
+    /** The vendor's own id for this account, so a renamed handle still resolves. */
+    @Column(name = "insights_external_id")
+    private String insightsExternalId;
+
+    /** When the vendor last answered. A report costs a credit, so staleness is checked first. */
+    @Column(name = "insights_refreshed_at")
+    private Instant insightsRefreshedAt;
+
+    // -------------------------------------------- consent (requirement #20)
+    //
+    // The answers to the five opt-in questions. consent_records remains the audit trail of every
+    // grant and withdrawal; these are the current state, so a screen or a send check can read
+    // them without aggregating the evidence table.
+
+    /** Requirement #21: false blocks outreach regardless of the suppression list. */
+    @Column(name = "consent_marketing_email", nullable = false)
+    private boolean consentMarketingEmail = false;
+
+    @Column(name = "consent_gifting_address", nullable = false)
+    private boolean consentGiftingAddress = false;
+
+    @Column(name = "consent_brand_sharing", nullable = false)
+    private boolean consentBrandSharing = false;
+
+    @Column(name = "consent_content_reuse", nullable = false)
+    private boolean consentContentReuse = false;
+
     @Column(name = "opt_in_status", nullable = false)
     private String optInStatus = "APPROVED";
 

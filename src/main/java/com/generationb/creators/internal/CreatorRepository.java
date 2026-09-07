@@ -73,6 +73,60 @@ public interface CreatorRepository extends JpaRepository<Creator, UUID> {
     @Query("SELECT c FROM Creator c WHERE c.id IN :ids AND c.deletedAt IS NULL")
     List<Creator> findAllActiveByIds(@Param("ids") List<UUID> ids);
 
+    /**
+     * Requirement #26: the creators whose audience figures are most out of date, never-enriched
+     * first. Ordered so a bounded batch spends its credits where they buy the most.
+     */
+    @Query("""
+        SELECT c FROM Creator c
+        WHERE c.deletedAt IS NULL
+          AND c.anonymisedAt IS NULL
+          AND c.handle IS NOT NULL
+          AND (c.insightsRefreshedAt IS NULL OR c.insightsRefreshedAt < :staleBefore)
+        ORDER BY c.insightsRefreshedAt ASC NULLS FIRST, c.followersCount DESC
+        """)
+    List<Creator> findStalestForEnrichment(@Param("staleBefore") java.time.Instant staleBefore,
+                                           Pageable pageable);
+
+    /**
+     * Requirement #37: creators nobody has touched in a long time.
+     *
+     * <p>"Touched" means contacted, gifted, edited or posting — anything that shows the
+     * relationship is live. These are surfaced for a human to decide on rather than anonymised
+     * automatically: storage limitation is a real obligation, but silently destroying a client's
+     * contact list because a cron job fired is a worse outcome than holding it a week longer.
+     */
+    @Query(value = """
+        SELECT c.* FROM creators c
+        WHERE c.deleted_at IS NULL
+          AND c.anonymised_at IS NULL
+          AND c.updated_at < :before
+          AND NOT EXISTS (SELECT 1 FROM creator_send_history h
+                           WHERE h.creator_id = c.id AND h.sent_at >= :before)
+          AND NOT EXISTS (SELECT 1 FROM coverage_items ci
+                           WHERE ci.creator_id = c.id AND ci.posted_at >= :before)
+          AND NOT EXISTS (SELECT 1 FROM creator_notes n
+                           WHERE n.creator_id = c.id AND n.updated_at >= :before)
+        ORDER BY c.updated_at ASC
+        """, nativeQuery = true)
+    List<Creator> findDueForRetentionReview(@Param("before") java.time.Instant before,
+                                            Pageable pageable);
+
+    @Query(value = """
+        SELECT COUNT(*) FROM creators c
+        WHERE c.deleted_at IS NULL
+          AND c.anonymised_at IS NULL
+          AND c.updated_at < :before
+          AND NOT EXISTS (SELECT 1 FROM creator_send_history h
+                           WHERE h.creator_id = c.id AND h.sent_at >= :before)
+          AND NOT EXISTS (SELECT 1 FROM coverage_items ci
+                           WHERE ci.creator_id = c.id AND ci.posted_at >= :before)
+          AND NOT EXISTS (SELECT 1 FROM creator_notes n
+                           WHERE n.creator_id = c.id AND n.updated_at >= :before)
+        """, nativeQuery = true)
+    int countDueForRetentionReview(@Param("before") java.time.Instant before);
+
+
     @Query("SELECT COUNT(c) FROM Creator c WHERE c.deletedAt IS NULL")
     long countActive();
 

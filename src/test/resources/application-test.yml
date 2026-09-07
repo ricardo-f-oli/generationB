@@ -1,0 +1,33 @@
+# Profile for the Testcontainers integration tests.
+#
+# The datasource is supplied by @ServiceConnection from the Postgres container, so it is
+# deliberately absent here. What this file does is undo the H2 shortcuts in the base test
+# config: Flyway runs, and Hibernate validates rather than generating the schema.
+#
+# That combination is the point. Running the real migrations against a real Postgres is what
+# catches the class of bug this project keeps hitting — JSONB binding, parameter type inference,
+# partial unique indexes — none of which H2 with ddl-auto:update would ever surface.
+
+spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+# The schedulers must not fire during a test run and send mail or call a provider.
+spring.task.scheduling.pool.size: 1
+
+logging:
+  level:
+    root: WARN
+    com.generationb: INFO
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN

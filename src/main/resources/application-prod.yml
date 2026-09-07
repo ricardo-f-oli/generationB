@@ -24,3 +24,8 @@ logging:
   level:
     root: INFO
     com.generationb: INFO
+
+# An ephemeral container disk is not storage: anything written locally is lost on the next
+# deploy and is invisible to a second instance. Production must use the object store.
+storage:
+  provider: ${STORAGE_PROVIDER:s3}

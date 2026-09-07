@@ -18,3 +18,16 @@ cors:
 logging:
   level:
     com.generationb: DEBUG
+
+# Local development convenience. The SendGrid event webhook fails closed without a public key,
+# which is correct everywhere else but makes it impossible to poke the endpoint with curl here.
+# Every call it lets through is logged as a warning. Never set this outside local.
+outreach:
+  sendgrid:
+    webhook-allow-unsigned: ${SENDGRID_WEBHOOK_ALLOW_UNSIGNED:true}
+    inbound-token: ${OUTREACH_SENDGRID_INBOUND_TOKEN:local-dev-inbound-token}
+
+# Seeded demo brands have no insurance policy on file, and blocking dispatch on a fresh clone
+# would look like a bug rather than a control. Production keeps the default of true.
+gifting:
+  require-product-liability: ${GIFTING_REQUIRE_PRODUCT_LIABILITY:false}

@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -48,6 +49,38 @@ public class OutreachCampaignController {
     public ResponseEntity<ApiResponse<OutreachCampaignResponse>> sendNow(@PathVariable UUID id) {
         OutreachCampaignResponse response = campaignService.sendNow(id);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    // -------------------------------- sending it yourself (#28 interim)
+
+    /**
+     * The campaign's emails, personalised and ready for a person to send from their own mailbox.
+     *
+     * <p>Exists because the sending domain is not authenticated yet. A domain publishing
+     * {@code v=spf1 -all} does not get its mail spam-foldered, it gets it rejected, so queueing
+     * outreach through the platform today would just produce bounces.
+     *
+     * <p>Nothing is marked as sent by this call — see {@code /mark-sent}.
+     */
+    @GetMapping("/{id}/manual-send")
+    public ApiResponse<OutreachCampaignService.ManualSendBatch> prepareManualSend(
+            @PathVariable UUID id) {
+        return ApiResponse.of(campaignService.prepareManualSend(id));
+    }
+
+    /**
+     * Confirms which of them the user actually sent.
+     *
+     * <p>Only the person who pressed send in their mail client knows this, which is why it is a
+     * separate step. It writes send history, so a manually sent email still counts towards the
+     * duplicate flag and the coverage reconciliation.
+     */
+    @PostMapping("/{id}/mark-sent")
+    public ApiResponse<Map<String, Integer>> markSentManually(
+            @PathVariable UUID id,
+            @RequestBody(required = false) List<UUID> recipientIds) {
+        return ApiResponse.of(Map.of("marked",
+                campaignService.markSentManually(id, recipientIds)));
     }
 
     @PostMapping("/{id}/schedule")

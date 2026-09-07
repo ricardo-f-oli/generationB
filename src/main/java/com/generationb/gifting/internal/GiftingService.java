@@ -46,6 +46,13 @@ public class GiftingService {
     private final BrandOrderRepository brandOrderRepository;
     private final CreatorLookupPort creatorLookup;
     private final BrandLookupPort brandLookup;
+
+    /**
+     * Requirement #40. Whether a lapsed policy blocks dispatch or only warns. Defaults to
+     * blocking: the whole point of recording cover is that something acts on it.
+     */
+    @org.springframework.beans.factory.annotation.Value("${gifting.require-product-liability:true}")
+    private boolean requireProductLiability;
     private final EmailSender emailSender;
 
     @Value("${app.frontend-url:http://localhost:5173}")
@@ -248,6 +255,7 @@ public class GiftingService {
             throw ApiException.unprocessable(
                     "The comp slip for this run has not been approved yet.");
         }
+        requireProductLiabilityCover(brandId);
 
         List<UUID> creatorIds = command.creatorIds().stream().distinct().toList();
         Set<UUID> withAddress = new HashSet<>(addressRepository.findCreatorIdsWithAddress(creatorIds));
@@ -494,6 +502,37 @@ public class GiftingService {
     // =====================================================================
     // Helpers
     // =====================================================================
+
+
+    /**
+     * Requirement #40: refuses to send a brand's product to a creator's home unless that brand's
+     * product liability cover is on file and in date.
+     *
+     * <p>This is the one insurance question that is answerable per action, and the one with a
+     * real victim if it goes wrong — a cosmetic that burns someone, a candle that sets light to
+     * something. Professional indemnity and public liability are facts about the agency rather
+     * than the campaign, so they live in the MSA rather than in a column nothing reads.
+     *
+     * <p>Blocks the whole run rather than skipping creators: cover is a property of the brand, so
+     * if it is missing then no parcel on this run should go, and saying so once is clearer than
+     * saying it forty times.
+     */
+    private void requireProductLiabilityCover(UUID brandId) {
+        if (!requireProductLiability) {
+            return;
+        }
+        BrandLookupPort.BrandProfile brand = brandLookup.findProfile(brandId).orElse(null);
+        if (brand == null || brand.hasProductLiabilityCover()) {
+            return;
+        }
+
+        String detail = brand.productLiabilityExpiresOn() == null
+                ? "No product liability cover is recorded for this brand."
+                : "This brand's product liability cover expired on "
+                        + brand.productLiabilityExpiresOn() + ".";
+        throw ApiException.unprocessable(detail
+                + " Add the current policy under Settings before dispatching product.");
+    }
 
     private GiftingRun requireRun(UUID runId) {
         return runRepository.findScopedById(runId)

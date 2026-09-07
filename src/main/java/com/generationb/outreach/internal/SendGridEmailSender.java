@@ -49,7 +49,8 @@ public class SendGridEmailSender {
     private String frontendUrl;
 
     /** When no API key is configured the sender logs instead of failing — needed for the demo. */
-    private boolean isConfigured() {
+    /** Whether the platform can send for itself. False means outreach has to go out by hand. */
+    boolean isConfigured() {
         return apiKey != null && !apiKey.isBlank() && apiKey.startsWith("SG.");
     }
 

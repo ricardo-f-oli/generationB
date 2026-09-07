@@ -12,6 +12,16 @@ import java.util.UUID;
 @Repository
 public interface LoginAttemptRepository extends JpaRepository<LoginAttempt, UUID> {
 
+    // ---------------------------------------------------- retention (#37)
+
+    @Query("SELECT COUNT(l) FROM LoginAttempt l WHERE l.attemptedAt < :before")
+    int countBefore(@Param("before") java.time.Instant before);
+
+    @Modifying
+    @Query("DELETE FROM LoginAttempt l WHERE l.attemptedAt < :before")
+    int deleteBefore(@Param("before") java.time.Instant before);
+
+
     @Query("""
         SELECT COUNT(a) FROM LoginAttempt a
         WHERE LOWER(a.identifier) = LOWER(:identifier)

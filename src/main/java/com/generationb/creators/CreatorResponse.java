@@ -31,6 +31,13 @@ public record CreatorResponse(
     String audienceAgeBand,
     String audienceGenderSplit,
     String qualityBand,
+    /**
+     * Where the four audience fields above came from: {@code MODASH}, or null when a person
+     * typed them. The screen shows it because a measured figure and a guess look identical
+     * otherwise.
+     */
+    String insightsSource,
+    Instant insightsRefreshedAt,
     String optInStatus,
     List<String> tags,
     List<BrandEngagement> brandEngagements,

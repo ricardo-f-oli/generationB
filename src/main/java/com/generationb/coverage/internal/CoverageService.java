@@ -78,7 +78,7 @@ public class CoverageService {
         item.setPostType(orDefault(command.postType(), "REEL").toUpperCase());
         item.setUrl(blankToNull(command.url()));
         item.setCaption(command.caption());
-        item.setViews(nz(command.views()));
+        item.setViews(command.views());
         item.setLikes(nz(command.likes()));
         item.setComments(nz(command.comments()));
         item.setShares(command.shares());
@@ -88,7 +88,7 @@ public class CoverageService {
         item.setPostedAt(command.postedAt() != null ? command.postedAt() : Instant.now());
         item.setSource(CoverageItem.MANUAL);
 
-        finish(item, brandId);
+        finish(item, brandId, null);
         return toResponse(coverageRepository.save(item));
     }
 
@@ -174,7 +174,9 @@ public class CoverageService {
             item.setUrl(url);
             item.setCaption(asString(post.get("caption")));
             item.setExternalId(asString(post.get("id")));
-            item.setViews(asLong(post.get("views")));
+            // Instagram publishes no view count. Recording 0 would tell a client nobody saw
+            // the post; leaving it unset lets the report say "Not tracked".
+            item.setViews(post.containsKey("views") ? asLong(post.get("views")) : null);
             item.setLikes(asLong(post.get("likes")));
             item.setComments(asLong(post.get("comments")));
             item.setShares(post.containsKey("shares") ? asLong(post.get("shares")) : null);
@@ -183,7 +185,8 @@ public class CoverageService {
             item.setSource(source);
             item.setPostedAt(parseInstant(post.get("postedAt")));
 
-            finish(item, brandId);
+            finish(item, brandId, post.containsKey("authorFollowers")
+                    ? asLong(post.get("authorFollowers")) : null);
             captured.add(toResponse(coverageRepository.save(item)));
         }
 
@@ -192,11 +195,17 @@ public class CoverageService {
         return new ClipResult(captured.size(), duplicates, captured);
     }
 
-    /** Fills in the derived fields every item needs however it arrived. */
-    private void finish(CoverageItem item, UUID brandId) {
+    /**
+     * Fills in the derived fields every item needs however it arrived.
+     *
+     * @param authorFollowers the creator's follower count when the provider supplied one, so an
+     *                        Instagram post — which carries no view count to divide by — still
+     *                        gets a real engagement rate rather than a zero
+     */
+    private void finish(CoverageItem item, UUID brandId, Long authorFollowers) {
         item.setContentForm(CoverageItem.formFor(item.getPostType()));
         if (item.getEr() == null || item.getEr().compareTo(BigDecimal.ZERO) == 0) {
-            item.setEr(engagementRate(item));
+            item.setEr(engagementRate(item, authorFollowers));
         }
         item.setStandardizedName(buildClippingName(item, brandId));
     }
@@ -391,7 +400,9 @@ public class CoverageService {
                 html.append(" <span style=\"color:#E00008;font-size:11px;\">unsolicited</span>");
             }
             html.append("</td><td>").append(escape(item.getPlatform())).append("</td>")
-                    .append("<td>").append(format(nz(item.getViews()))).append("</td>")
+                    .append("<td>").append(item.getViews() == null
+                            ? "<span style=\"color:#6B6B6B;\">not tracked</span>"
+                            : format(item.getViews())).append("</td>")
                     .append("<td>").append(format(item.engagements())).append("</td>")
                     .append("<td>");
             if (notBlank(item.getUrl())) {
@@ -413,21 +424,31 @@ public class CoverageService {
     // Helpers
     // =====================================================================
 
-    private BigDecimal engagementRate(CoverageItem item) {
-        long views = nz(item.getViews());
-        if (views <= 0) {
+    /**
+     * Engagements over views where the platform publishes views — TikTok does — and over
+     * followers where it does not, which is the convention on Instagram anyway.
+     *
+     * <p>Zero means "could not be computed". The reporting aggregates already read it that way:
+     * they average {@code NULLIF(er, 0)}, so an uncomputed row does not drag the mean down.
+     */
+    private BigDecimal engagementRate(CoverageItem item, Long authorFollowers) {
+        long denominator = nz(item.getViews());
+        if (denominator <= 0) {
+            denominator = nz(authorFollowers);
+        }
+        if (denominator <= 0) {
             return BigDecimal.ZERO;
         }
         return BigDecimal.valueOf(item.engagements())
                 .multiply(BigDecimal.valueOf(100))
-                .divide(BigDecimal.valueOf(views), 2, RoundingMode.HALF_UP);
+                .divide(BigDecimal.valueOf(denominator), 2, RoundingMode.HALF_UP);
     }
 
     private CoverageItemResponse toResponse(CoverageItem item) {
         return new CoverageItemResponse(
                 item.getId(), item.getCampaignId(), item.getCreatorId(), item.getCreatorHandle(),
                 item.getPlatform(), item.getPostType(), item.getContentForm(), item.getUrl(),
-                item.getCaption(), nz(item.getViews()), nz(item.getLikes()), nz(item.getComments()),
+                item.getCaption(), item.getViews(), nz(item.getLikes()), nz(item.getComments()),
                 item.getShares(), item.getSaves(), item.getImpressions(), item.getEr(),
                 item.getStandardizedName(), item.isUnsolicited(), item.getSource(),
                 item.getPostedAt());

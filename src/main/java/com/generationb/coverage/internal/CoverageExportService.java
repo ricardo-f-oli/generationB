@@ -83,7 +83,11 @@ public class CoverageExportService {
                 row.createCell(4).setCellValue(nz(item.getContentForm()));
                 row.createCell(5).setCellValue(item.getPostedAt() == null
                         ? "" : DATE.format(item.getPostedAt()));
-                row.createCell(6).setCellValue(zero(item.getViews()));
+                // Left empty rather than zeroed: Instagram publishes no view count, and a
+                // spreadsheet column of zeros gets summed and quoted back to the client.
+                if (item.getViews() != null) {
+                    row.createCell(6).setCellValue(item.getViews());
+                }
                 row.createCell(7).setCellValue(zero(item.getLikes()));
                 row.createCell(8).setCellValue(zero(item.getComments()));
                 row.createCell(9).setCellValue(zero(item.getShares()));
@@ -99,7 +103,8 @@ public class CoverageExportService {
             Cell label = totals.createCell(5);
             label.setCellValue("Total");
             label.setCellStyle(headerStyle);
-            totals.createCell(6).setCellValue(items.stream().mapToLong(i -> zeroL(i.getViews())).sum());
+            totals.createCell(6).setCellValue(items.stream()
+                    .filter(i -> i.getViews() != null).mapToLong(CoverageItem::getViews).sum());
             totals.createCell(7).setCellValue(items.stream().mapToLong(i -> zeroL(i.getLikes())).sum());
             totals.createCell(8).setCellValue(items.stream().mapToLong(i -> zeroL(i.getComments())).sum());
 
@@ -125,7 +130,7 @@ public class CoverageExportService {
                     .append(quote(item.getPostType())).append(',')
                     .append(quote(item.getContentForm())).append(',')
                     .append(item.getPostedAt() == null ? "" : DATE.format(item.getPostedAt())).append(',')
-                    .append(zeroL(item.getViews())).append(',')
+                    .append(item.getViews() == null ? "" : String.valueOf(item.getViews())).append(',')
                     .append(zeroL(item.getLikes())).append(',')
                     .append(zeroL(item.getComments())).append(',')
                     .append(zeroL(item.getShares())).append(',')

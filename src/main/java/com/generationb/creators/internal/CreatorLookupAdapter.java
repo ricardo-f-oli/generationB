@@ -72,7 +72,16 @@ public class CreatorLookupAdapter implements CreatorLookupPort {
             return true;
         }
         return creatorRepository.findActiveById(creatorId)
-                .map(c -> c.getEmail() != null && suppressionRepository.existsByEmailIgnoreCase(c.getEmail()))
+                .map(creator -> {
+                    // Requirement #20/#21: not ticking "email me about campaigns" is a refusal,
+                    // and a refusal has to bite at the same place an unsubscribe does. Otherwise
+                    // the question on the form is decoration.
+                    if (!creator.isConsentMarketingEmail()) {
+                        return true;
+                    }
+                    return creator.getEmail() != null
+                            && suppressionRepository.existsByEmailIgnoreCase(creator.getEmail());
+                })
                 .orElse(false);
     }
 

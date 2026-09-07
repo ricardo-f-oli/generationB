@@ -24,6 +24,8 @@
         <openpdf.version>2.0.3</openpdf.version>
         <poi.version>5.3.0</poi.version>
         <testcontainers.version>1.20.4</testcontainers.version>
+        <!-- Cloudflare R2 speaks the S3 API, so the standard AWS SDK drives it. -->
+        <awssdk.version>2.29.29</awssdk.version>
     </properties>
     <dependencies>
         <dependency>
@@ -126,6 +128,29 @@
             <scope>test</scope>
         </dependency>
 
+        <!--
+            Requirement #5 and the asset exports: object storage. Cloudflare R2 is
+            S3-compatible and has a free tier with no egress fees, which is why it was
+            chosen over S3 itself. Only the S3 module is pulled in, not the whole SDK.
+        -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>${awssdk.version}</version>
+            <exclusions>
+                <!-- Netty is only needed by the async client, which we do not use. -->
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache-client</artifactId>
+            <version>${awssdk.version}</version>
+        </dependency>
+
         <!-- Requirement #54: client deliverables as Excel and PowerPoint. -->
         <dependency>
             <groupId>org.apache.poi</groupId>
@@ -146,6 +171,32 @@
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- Supplies @ServiceConnection, so the container wires up the datasource itself. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            MinIO speaks the S3 API too, so the storage adapter is tested against a real
+            object store rather than a mock. A mocked S3 client would have passed while the
+            bucket layout, content types and presigned URLs were all wrong.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>minio</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Readable assertions in the behaviour tests. -->
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
     <dependencyManagement>
         <dependencies>
@@ -158,8 +209,38 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+    <profiles>
+        <!--
+            Performance tests are excluded by default: they push concurrency and a 20MB upload
+            through the container, which is worth doing on a schedule but not on every commit.
+            Run them with -Pperformance.
+        -->
+        <profile>
+            <id>performance</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <groups>performance</groups>
+                            <excludedGroups/>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludedGroups>performance</excludedGroups>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>

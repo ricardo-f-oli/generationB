@@ -3,6 +3,7 @@ package com.generationb.foundation.internal;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -14,6 +15,19 @@ import java.util.UUID;
 /** Requirement #36: the audit trail, read back. */
 @Repository
 public interface AuditLogRepository extends JpaRepository<AuditLog, UUID> {
+
+    // ---------------------------------------------------- retention (#37)
+
+    @Query("SELECT COUNT(a) FROM AuditLog a WHERE a.timestamp < :before")
+    int countBefore(@Param("before") java.time.Instant before);
+
+    @Modifying
+    @Query("DELETE FROM AuditLog a WHERE a.timestamp < :before")
+    int deleteBefore(@Param("before") java.time.Instant before);
+
+    @Query("SELECT MIN(a.timestamp) FROM AuditLog a")
+    java.time.Instant oldestEntry();
+
 
     @Query("""
         SELECT a FROM AuditLog a

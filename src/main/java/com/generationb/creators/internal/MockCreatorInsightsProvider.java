@@ -2,15 +2,25 @@ package com.generationb.creators.internal;
 
 import com.generationb.creators.CreatorInsightsProvider;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.*;
 
-// TODO(confirm): schema real da Modash pendente de contrato — ajustar mapeamento quando o contrato for assinado
-// TODO(confirm): modelo de custo pass-through ainda não definido comercialmente
+/**
+ * The stand-in used before the Modash key arrived, and still the provider whenever no vendor key
+ * is configured — a fresh clone gets a working demo rather than an empty screen.
+ *
+ * <p>Also selected when {@code insights.provider=mock} is set explicitly, which is how you hold a
+ * live key without using it yet.
+ *
+ * <p>Every response is logged as {@code [MOCK MODASH]} so nobody mistakes generated numbers for
+ * a client's real coverage. {@link ModashCreatorInsightsProvider} is the live one.
+ */
 @Slf4j
 @Component
+@Conditional(InsightsProviderCondition.Mock.class)
 public class MockCreatorInsightsProvider implements CreatorInsightsProvider {
 
     @Override
