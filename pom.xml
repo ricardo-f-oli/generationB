@@ -234,12 +234,53 @@
 
     <build>
         <plugins>
+            <!--
+              Surefire runs the unit suite. Integration tests need a real Postgres and object
+              store via Testcontainers, so they are excluded here and run by failsafe below.
+
+              This is what the Docker image build executes (`mvn clean package`), and a Docker
+              build stage has no Docker daemon of its own. Running them there produced five
+              classes erroring with NoClassDefFoundError — which looks like a compilation
+              failure and is not one.
+            -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <excludedGroups>performance</excludedGroups>
+                    <excludedGroups>performance,integration</excludedGroups>
                 </configuration>
+            </plugin>
+
+            <!--
+              Failsafe runs the integration suite during `mvn verify`, which is what CI uses.
+              Bound explicitly because these classes are named *Test rather than *IT, and
+              renaming five well-named classes to satisfy a default pattern is the wrong way
+              round.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <groups>integration</groups>
+                    <!--
+                      PerformanceTest extends IntegrationTest, so @Tag is inherited and it lands
+                      in this group too. It is heavy and meant for the nightly schedule, so it
+                      is excluded here as well as from surefire.
+                    -->
+                    <excludedGroups>performance</excludedGroups>
+                    <includes>
+                        <include>**/*Test.java</include>
+                    </includes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <!-- verify is what turns a failure into a failed build. -->
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

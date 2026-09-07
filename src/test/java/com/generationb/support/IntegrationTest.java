@@ -1,6 +1,7 @@
 package com.generationb.support;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -28,11 +29,25 @@ import java.nio.file.Path;
  *
  * <p>Both containers are static, so all subclasses share one instance rather than paying the
  * startup cost per class.
+ *
+ * <p>Tagged {@code integration}, which keeps it out of the default {@code mvn test} run. That
+ * matters because the production image is built by running Maven inside a Docker build stage,
+ * and a build stage has no Docker daemon of its own — these tests cannot run there, and trying
+ * produced five classes failing with {@code NoClassDefFoundError}, which reads like a
+ * compilation error and is not one.
+ *
+ * <p>They run under {@code mvn verify}, which is what CI uses. Nothing is weakened: the image
+ * build still runs the whole unit suite, so a broken commit still cannot produce a deployable
+ * jar, and CI checks that these actually executed rather than silently vanishing.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Testcontainers
+// Requires a Docker daemon, so it is excluded from the default `mvn test` run and executed by
+// failsafe during `mvn verify` instead. @Tag is @Inherited, so every subclass is covered without
+// having to remember to tag it. See the surefire/failsafe configuration in pom.xml.
+@Tag("integration")
 public abstract class IntegrationTest {
 
     @ServiceConnection

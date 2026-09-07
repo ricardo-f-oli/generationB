@@ -79,10 +79,26 @@ are deliberate: a fresh clone should run, and it should be obvious when a number
 
 | Layer | Count | Runs with |
 |---|---|---|
-| Backend unit + integration | 151 | `mvn test` (Testcontainers: Postgres + MinIO) |
+| Backend unit | 111 | `mvn test` — surefire, no Docker needed |
+| Backend integration | 47 | `mvn verify` — failsafe, needs Docker |
 | Frontend unit | 23 | `npm test` |
 | End-to-end, desktop | 3 | `npx playwright test --project=chromium` |
 | End-to-end, mobile | 34 | `npx playwright test --project=mobile` |
+
+### Why the backend suite is split
+
+Integration tests are tagged `integration` (inherited from `IntegrationTest`) and excluded from
+surefire. They need Testcontainers, and **the production image is built by running Maven inside a
+Docker build stage, which has no Docker daemon of its own.** Running them there made five classes
+fail with `NoClassDefFoundError` — which reads like a compilation error and is not one.
+
+So `mvn package` (what the Dockerfile runs) executes the unit suite only, and `mvn verify` (what
+CI runs) executes both. Nothing is weakened: a broken commit still cannot produce a deployable
+jar, and CI fails the build if the integration suite reports fewer than 40 tests, so it cannot
+silently stop running.
+
+`@Tag` is `@Inherited`, so `PerformanceTest` — which extends `IntegrationTest` — picks up the tag
+too. Failsafe excludes `performance` for that reason; it is a nightly job.
 
 The mobile project runs on **WebKit at an iPhone 13 viewport** — the real iOS engine, not a
 resized desktop window. It asserts the two things that actually make a page unusable on a phone:

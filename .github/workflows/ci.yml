@@ -46,15 +46,40 @@ jobs:
       - name: Check Docker is available
         run: docker info > /dev/null
 
+      # `verify`, not `test`: surefire runs the unit suite, failsafe runs the integration
+      # suite. The Docker image build only runs `package`, so this job is the only place the
+      # Testcontainers tests execute.
       - name: Build and test
         run: mvn -B verify
+
+      # A suite that silently stops running looks exactly like a passing one. This is the
+      # guard: if the integration tests ever get excluded, skipped or tagged out by accident,
+      # the build fails here rather than going green with no integration coverage at all.
+      - name: Check the integration suite actually ran
+        run: |
+          if [ ! -d target/failsafe-reports ]; then
+            echo "::error::No failsafe reports. The integration suite did not run."
+            exit 1
+          fi
+          count=$(grep -ho 'tests="[0-9]*"' target/failsafe-reports/TEST-*.xml \
+                  | grep -o '[0-9]*' | paste -sd+ - | bc)
+          count=${count:-0}
+          echo "Integration tests executed: $count"
+          # A floor rather than an exact number, so adding tests does not break the build.
+          if [ "$count" -lt 40 ]; then
+            echo "::error::Expected at least 40 integration tests, got $count."
+            exit 1
+          fi
 
       - name: Publish test report
         # Runs even when tests fail, which is precisely when the report is wanted.
         if: always()
         uses: mikepenz/action-junit-report@v4
         with:
-          report_paths: '**/target/surefire-reports/TEST-*.xml'
+          # Both suites — failsafe results were previously not reported at all.
+          report_paths: |
+            **/target/surefire-reports/TEST-*.xml
+            **/target/failsafe-reports/TEST-*.xml
           detailed_summary: true
           include_passed: false
 

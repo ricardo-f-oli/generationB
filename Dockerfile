@@ -9,6 +9,14 @@ RUN mvn -B dependency:go-offline
 COPY src ./src
 # Q-E29: tests run in the image build, so a broken commit cannot produce a deployable jar.
 # Pass --build-arg SKIP_TESTS=true only for an emergency hotfix.
+#
+# `package` runs surefire only — the unit suite. It deliberately does NOT run the integration
+# suite: those need Testcontainers, and a Docker build stage has no Docker daemon of its own.
+# Attempting them here produced five classes erroring with NoClassDefFoundError, which reads
+# like a compilation failure and is not one.
+#
+# The integration suite runs in CI under `mvn verify`, where a daemon exists, and CI asserts
+# that it actually executed.
 ARG SKIP_TESTS=false
 RUN if [ "$SKIP_TESTS" = "true" ]; then \
       mvn -B clean package -DskipTests; \
@@ -22,6 +30,12 @@ WORKDIR /app
 
 # Q-E29: do not run as root.
 RUN addgroup -S app && adduser -S -G app app
+
+# The local storage adapter writes here. /app is owned by root, so without this the container
+# dies at startup with AccessDeniedException the moment STORAGE_PROVIDER=local — which is the
+# documented fallback and what the CI smoke test uses. Production overrides to S3, so this is a
+# safety net rather than the normal path.
+RUN mkdir -p /app/data/uploads && chown -R app:app /app/data
 
 COPY --from=builder --chown=app:app /app/target/generationb-0.0.1-SNAPSHOT.jar app.jar
 
