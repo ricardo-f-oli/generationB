@@ -77,6 +77,16 @@ public class CoverageItem extends BaseEntity {
     @Column(name = "saves")
     private Long saves;
 
+    /**
+     * Which brand or campaign term was found in the caption, as it appeared: "#klsummer24a7f3".
+     *
+     * <p>Null means the post matched nothing and is one of the creator ordinary posts. Recorded
+     * because "why is this in the coverage log?" gets asked about every automatically clipped
+     * item, and the honest answer is the exact token that matched.
+     */
+    @Column(name = "matched_term", length = 150)
+    private String matchedTerm;
+
     /** Requirement #49: short vs long form split. Derived from post type on write. */
     @Column(name = "content_form")
     private String contentForm;

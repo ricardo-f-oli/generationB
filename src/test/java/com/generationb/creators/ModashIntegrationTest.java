@@ -14,6 +14,7 @@ import org.springframework.test.context.TestPropertySource;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.List;
 
 import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -260,6 +261,90 @@ class ModashIntegrationTest extends IntegrationTest {
     }
 
     // =====================================================================
+    // Attribution without paying for a hashtag lookup
+    // =====================================================================
+
+    @Test
+    @DisplayName("a post carrying the campaign tag is credited to that campaign")
+    void aTaggedPostIsAttributed() throws Exception {
+        Creator creator = anyCreator();
+        String campaignId = createCampaign("Summer Seeding");
+        String tag = trackingHashtagOf(campaignId);
+
+        // The creator's feed, with the campaign's own tag in the first caption — a briefed
+        // creator delivering. Attribution is exact because the feed is fetched BY HANDLE, which
+        // is the whole point: Instagram's hashtag search would return this post with no username
+        // attached and cost one of only 30 tags a week.
+        STUB.enqueue("/raw/ig/user-feed",
+                Response.ok(ModashStub.igFeed("ATTR", tag)));
+
+        mockMvc.perform(post("/api/coverage/campaigns/" + campaignId + "/clip")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json")
+                        .content("{\"creatorIds\":[\"" + creator.id() + "\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.captured", greaterThan(0)));
+
+        mockMvc.perform(get("/api/coverage/log?campaignId=" + campaignId + "&size=50")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                // Exactly one post carried the tag; the rest of the feed did not.
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].unsolicited").value(false))
+                // The matched token is recorded, because "why is this in the log?" gets asked
+                // about every automatically clipped item.
+                .andExpect(jsonPath("$.data[0].matchedTerm").value("#" + tag));
+    }
+
+    @Test
+    @DisplayName("a creator's ordinary posts are not credited to the campaign")
+    void untaggedPostsAreNotAttributed() throws Exception {
+        Creator creator = anyCreator();
+        String campaignId = createCampaign("Autumn Push");
+        String tag = trackingHashtagOf(campaignId);
+
+        // The stub feed holds two posts: one carrying the campaign tag, one an ordinary post
+        // captioned "Swipe".
+        STUB.enqueue("/raw/ig/user-feed",
+                Response.ok(ModashStub.igFeed("NOATTR", tag)));
+
+        mockMvc.perform(post("/api/coverage/campaigns/" + campaignId + "/clip")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json")
+                        .content("{\"creatorIds\":[\"" + creator.id() + "\"]}"))
+                .andExpect(status().isOk())
+                // Every post is logged as coverage — they are genuinely this creator's posts,
+                // across Instagram and TikTok.
+                .andExpect(jsonPath("$.data.captured", greaterThan(1)));
+
+        // But only the tagged one belongs to the campaign. Auto-clipping fetches a creator's
+        // recent posts wholesale and most are about something else entirely; crediting them all
+        // to whichever campaign triggered the fetch would inflate every report the client gets.
+        mockMvc.perform(get("/api/coverage/log?campaignId=" + campaignId + "&size=50")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(1)))
+                .andExpect(jsonPath("$.data[0].matchedTerm").value("#" + tag))
+                // The ordinary post is not silently marked as unsolicited brand coverage either.
+                .andExpect(jsonPath("$.data[*].caption", everyItem(containsString(tag))));
+    }
+
+    @Test
+    @DisplayName("every campaign gets its own tag, and it is unguessable enough to be unique")
+    void campaignsGetDistinctTrackingTags() throws Exception {
+        String first = trackingHashtagOf(createCampaign("Summer Seeding"));
+        String second = trackingHashtagOf(createCampaign("Summer Seeding"));
+
+        // Same name, different tags. Without the random tail, "#summerseeding" would match
+        // strangers' posts and credit the campaign with coverage it did not earn.
+        org.junit.jupiter.api.Assertions.assertNotEquals(first, second);
+        org.junit.jupiter.api.Assertions.assertTrue(first.matches("[a-z0-9]+"),
+                "a hashtag may only contain letters and digits: " + first);
+        org.junit.jupiter.api.Assertions.assertTrue(first.length() >= 6,
+                "too short to be unambiguous: " + first);
+    }
+
+    // =====================================================================
     // #23 / #25 — discovery
     // =====================================================================
 
@@ -357,6 +442,24 @@ class ModashIntegrationTest extends IntegrationTest {
 
     private String anyCreatorId() throws Exception {
         return anyCreator().id();
+    }
+
+    private String createCampaign(String name) throws Exception {
+        String response = mockMvc.perform(post("/api/campaigns")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json")
+                        .content("{\"name\":\"" + name + "\",\"campaignType\":\"SEEDING\"}"))
+                .andExpect(status().is2xxSuccessful())
+                .andReturn().getResponse().getContentAsString();
+        return com.jayway.jsonpath.JsonPath.read(response, "$.data.id");
+    }
+
+    private String trackingHashtagOf(String campaignId) throws Exception {
+        String response = mockMvc.perform(get("/api/campaigns/" + campaignId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return com.jayway.jsonpath.JsonPath.read(response, "$.data.trackingHashtag");
     }
 
     private long coverageRowCount() throws Exception {

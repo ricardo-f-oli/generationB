@@ -1,6 +1,7 @@
 package com.generationb.creators.internal;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Condition;
 import org.springframework.context.annotation.ConditionContext;
@@ -26,16 +27,28 @@ import static org.junit.jupiter.api.Assertions.*;
 class InsightsProviderConditionTest {
 
     private static final Condition MODASH = new InsightsProviderCondition.Modash();
+    private static final Condition PLATFORM = new InsightsProviderCondition.PlatformApis();
     private static final Condition MOCK = new InsightsProviderCondition.Mock();
 
-    /** A context carrying just the two properties the condition reads. */
+    /** A context carrying just the properties the conditions read. */
     private static ConditionContext contextWith(String provider, String apiKey) {
+        return contextWith(provider, apiKey, null, null);
+    }
+
+    private static ConditionContext contextWith(String provider, String apiKey,
+                                                String metaToken, String youtubeKey) {
         Map<String, Object> properties = new HashMap<>();
         if (provider != null) {
             properties.put("insights.provider", provider);
         }
         if (apiKey != null) {
             properties.put("insights.modash.api-key", apiKey);
+        }
+        if (metaToken != null) {
+            properties.put("insights.meta.access-token", metaToken);
+        }
+        if (youtubeKey != null) {
+            properties.put("insights.youtube.api-key", youtubeKey);
         }
         StandardEnvironment environment = new StandardEnvironment();
         environment.getPropertySources()
@@ -52,20 +65,25 @@ class InsightsProviderConditionTest {
                 });
     }
 
-    private static void assertVendorSelected(String provider, String apiKey, String why) {
-        ConditionContext context = contextWith(provider, apiKey);
+    /** Asserts exactly one of the three conditions matches, and that it is the expected one. */
+    private static void assertSelected(Condition expected, ConditionContext context, String why) {
         AnnotatedTypeMetadata metadata = null;
-        assertTrue(MODASH.matches(context, metadata), why);
-        assertFalse(MOCK.matches(context, metadata),
-                "both providers would be registered: " + why);
+        for (Condition condition : new Condition[] {MODASH, PLATFORM, MOCK}) {
+            boolean matched = condition.matches(context, metadata);
+            if (condition == expected) {
+                assertTrue(matched, why);
+            } else {
+                assertFalse(matched, "a second provider also matched: " + why);
+            }
+        }
+    }
+
+    private static void assertVendorSelected(String provider, String apiKey, String why) {
+        assertSelected(MODASH, contextWith(provider, apiKey), why);
     }
 
     private static void assertMockSelected(String provider, String apiKey, String why) {
-        ConditionContext context = contextWith(provider, apiKey);
-        AnnotatedTypeMetadata metadata = null;
-        assertTrue(MOCK.matches(context, metadata), why);
-        assertFalse(MODASH.matches(context, metadata),
-                "both providers would be registered: " + why);
+        assertSelected(MOCK, contextWith(provider, apiKey), why);
     }
 
     // =====================================================================
@@ -131,22 +149,77 @@ class InsightsProviderConditionTest {
         assertMockSelected("modsah", "SOME-REAL-KEY", "a typo must not select a metered vendor");
     }
 
+    @Nested
+    @DisplayName("The no-vendor route")
+    class PlatformRoute {
+
+        @Test
+        @DisplayName("a Meta token on its own selects the platform APIs")
+        void aMetaTokenSelectsPlatformApis() {
+            assertSelected(PLATFORM, contextWith(null, null, "META-TOKEN", null),
+                    "configuring Meta is intent to read from Meta");
+        }
+
+        @Test
+        @DisplayName("a YouTube key on its own does too")
+        void aYouTubeKeySelectsPlatformApis() {
+            assertSelected(PLATFORM, contextWith(null, null, null, "YT-KEY"),
+                    "YouTube alone is a usable configuration");
+        }
+
+        @Test
+        @DisplayName("the paid vendor wins when both are configured")
+        void theVendorTakesPrecedence() {
+            // It answers strictly more questions. If somebody is paying for it, that is the one
+            // they meant, and silently preferring the free-but-thinner source would drop
+            // demographics and creator search without saying so.
+            assertSelected(MODASH, contextWith(null, "MODASH-KEY", "META-TOKEN", "YT-KEY"),
+                    "a configured vendor key must beat platform credentials");
+        }
+
+        @Test
+        @DisplayName("an explicit choice still wins over both")
+        void explicitProviderWins() {
+            assertSelected(PLATFORM, contextWith("platform", "MODASH-KEY", null, null),
+                    "insights.provider=platform must override a vendor key");
+            assertSelected(MOCK, contextWith("mock", "MODASH-KEY", "META-TOKEN", "YT-KEY"),
+                    "insights.provider=mock must hold everything back");
+        }
+
+        @Test
+        @DisplayName("empty platform credentials count as unset")
+        void emptyPlatformCredentialsAreAbsent() {
+            assertSelected(MOCK, contextWith(null, null, "", "  "),
+                    "blank credentials must not select a provider that cannot work");
+        }
+    }
+
     @Test
     @DisplayName("exactly one provider is always registered")
-    void theTwoConditionsAreStrictInverses() {
-        // Both matching would make the injection point ambiguous; neither matching would fail
+    void theThreeConditionsPartitionEveryCase() {
+        // Two matching would make the injection point ambiguous; none matching would fail
         // startup on a missing bean. Every combination must resolve to precisely one.
-        String[] providers = {null, "", "mock", "modash", "MODASH", "nonsense"};
+        String[] providers = {null, "", "mock", "modash", "platform", "MODASH", "nonsense"};
         String[] keys = {null, "", "KEY"};
+        String[] metas = {null, "", "META"};
+        String[] youtubes = {null, "", "YT"};
 
         for (String provider : providers) {
             for (String key : keys) {
-                ConditionContext context = contextWith(provider, key);
-                boolean vendor = MODASH.matches(context, null);
-                boolean mock = MOCK.matches(context, null);
-                assertNotEquals(vendor, mock,
-                        "provider=" + provider + " key=" + key + " registered "
-                                + (vendor ? "both" : "neither"));
+                for (String meta : metas) {
+                    for (String yt : youtubes) {
+                        ConditionContext context = contextWith(provider, key, meta, yt);
+                        int matched = 0;
+                        for (Condition condition : new Condition[] {MODASH, PLATFORM, MOCK}) {
+                            if (condition.matches(context, null)) {
+                                matched++;
+                            }
+                        }
+                        assertEquals(1, matched,
+                                "provider=" + provider + " modash=" + key + " meta=" + meta
+                                        + " youtube=" + yt + " matched " + matched + " providers");
+                    }
+                }
             }
         }
     }

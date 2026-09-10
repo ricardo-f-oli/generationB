@@ -77,6 +77,27 @@ public class CoverageController {
                 request.creatorId(), request.creatorHandle(), request.campaignId()));
     }
 
+    public record CampaignClipRequest(List<UUID> creatorIds) {
+    }
+
+    /**
+     * Requirements #11 and #15: which of a campaign's creators have actually posted.
+     *
+     * <p>Reads those creators' own posts and matches the campaign's tracking hashtag. Attribution
+     * is exact because the posts are fetched by handle, and it costs nothing extra — the same
+     * fetch already happens for auto-clipping, and it spends none of Instagram's 30-unique-tags
+     * weekly allowance.
+     *
+     * <p>Hashtag search remains for genuinely unsolicited posts by creators nobody briefed, which
+     * is the one thing this cannot see.
+     */
+    @PostMapping("/campaigns/{campaignId}/clip")
+    public ApiResponse<ClipResult> clipCampaignPosts(
+            @PathVariable UUID campaignId,
+            @RequestBody CampaignClipRequest request) {
+        return ApiResponse.of(coverageService.clipCampaignPosts(campaignId, request.creatorIds()));
+    }
+
     /** Requirement #11: unsolicited coverage, found by brand name or monitored hashtags. */
     @PostMapping("/clip/mentions")
     public ApiResponse<ClipResult> clipMentions(@RequestParam(defaultValue = "25") int limit) {

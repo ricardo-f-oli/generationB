@@ -31,6 +31,11 @@ public final class CoverageDtos {
             Long saves,
             Long impressions,
             BigDecimal er,
+            /**
+             * The brand or campaign term found in the caption, as it appeared. Null means the
+             * post matched nothing, which is the honest answer to "why is this in the log?"
+             */
+            String matchedTerm,
             String standardizedName,
             boolean unsolicited,
             String source,

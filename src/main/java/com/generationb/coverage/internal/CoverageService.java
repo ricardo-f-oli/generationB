@@ -38,6 +38,7 @@ public class CoverageService {
     private static final Instant LATEST = Instant.parse("2999-12-31T23:59:59Z");
     private static final DateTimeFormatter NAME_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
+    private final com.generationb.shared.CampaignBoardPort campaignLookup;
     private final CoverageItemRepository coverageRepository;
     private final CoverageDigestSettingsRepository digestSettingsRepository;
     private final CreatorInsightsProvider insightsProvider;
@@ -119,6 +120,43 @@ public class CoverageService {
     }
 
     /**
+     * Requirements #11 and #15, done the cheap way round.
+     *
+     * <p>Instagram's hashtag search returns posts with <em>no username</em>, so a mention found
+     * that way cannot be tied to a creator, and it spends one of only 30 unique tags per rolling
+     * 7 days shared across every brand.
+     *
+     * <p>This searches the other direction. It reads the posts of creators already on the
+     * campaign — by handle, so attribution is exact by construction — and matches their captions
+     * against the campaign's own tracking tag. The provider call is the same one auto-clipping
+     * already makes, so the matching itself is free and uses none of the hashtag allowance.
+     *
+     * <p>What it cannot find is a post by somebody nobody briefed. That is what hashtag search is
+     * still for, and why it survives as the expensive fallback rather than the first resort.
+     */
+    @Transactional
+    public ClipResult clipCampaignPosts(UUID campaignId, List<UUID> creatorIds) {
+        UUID brandId = BrandContext.requireBrandId();
+        if (creatorIds == null || creatorIds.isEmpty()) {
+            throw ApiException.unprocessable(
+                    "Add creators to this campaign before checking who has posted.");
+        }
+
+        List<CoverageItemResponse> captured = new ArrayList<>();
+        int duplicates = 0;
+
+        for (UUID creatorId : creatorIds) {
+            ClipResult result = ingest(brandId, insightsProvider.getRecentActivity(creatorId),
+                    creatorId, null, campaignId, CoverageItem.AUTO_CLIP, false);
+            captured.addAll(result.items());
+            duplicates += result.duplicates();
+        }
+        log.info("Campaign {}: checked {} creator(s), {} new post(s) matched",
+                campaignId, creatorIds.size(), captured.size());
+        return new ClipResult(captured.size(), duplicates, captured);
+    }
+
+    /**
      * Requirement #11: unsolicited coverage — posts that mention the brand or its hashtags from
      * creators nobody sent product to. Flagged as unsolicited so the report can count them
      * separately.
@@ -153,6 +191,11 @@ public class CoverageService {
         Set<String> seen = urls.isEmpty()
                 ? Set.of() : new HashSet<>(coverageRepository.findExistingUrls(brandId, urls));
 
+        // Looked up once for the whole batch rather than per post.
+        String campaignTag = campaignId == null ? null
+                : campaignLookup.findTrackingHashtag(campaignId).orElse(null);
+        BrandLookupPort.BrandProfile brand = brandLookup.findProfile(brandId).orElse(null);
+
         List<CoverageItemResponse> captured = new ArrayList<>();
         int duplicates = 0;
 
@@ -185,6 +228,10 @@ public class CoverageService {
             item.setSource(source);
             item.setPostedAt(parseInstant(post.get("postedAt")));
 
+            // Requirement #11: work out whether this post is actually about the brand, and if so
+            // which campaign it belongs to. Free — the caption is already in hand.
+            attribute(item, asString(post.get("caption")), campaignId, campaignTag, brand);
+
             finish(item, brandId, post.containsKey("authorFollowers")
                     ? asLong(post.get("authorFollowers")) : null);
             captured.add(toResponse(coverageRepository.save(item)));
@@ -193,6 +240,51 @@ public class CoverageService {
         log.info("Clipped {} new item(s) from {} ({} already logged)",
                 captured.size(), source, duplicates);
         return new ClipResult(captured.size(), duplicates, captured);
+    }
+
+    /**
+     * Decides what a post is evidence of, from its caption.
+     *
+     * <p>Three outcomes, in descending order of confidence:
+     *
+     * <ol>
+     *   <li>It carries the campaign's tracking tag. That is a briefed creator delivering, so the
+     *       post is attributed to the campaign and is not unsolicited.
+     *   <li>It carries a brand hashtag or an @mention of the brand. About the brand, but not tied
+     *       to a campaign.
+     *   <li>Neither. It is one of the creator's ordinary posts and has nothing to do with this
+     *       brand, so it is left off the campaign rather than padding its numbers.
+     * </ol>
+     *
+     * <p>That last case is the one worth being strict about. Auto-clipping fetches a creator's
+     * recent posts wholesale and most of them are about something else entirely. Attributing them
+     * all to whichever campaign happened to trigger the fetch would inflate every report the
+     * client receives.
+     */
+    private void attribute(CoverageItem item, String caption, UUID campaignId,
+                           String campaignTag, BrandLookupPort.BrandProfile brand) {
+        if (caption == null || caption.isBlank()) {
+            return;
+        }
+
+        if (campaignTag != null
+                && CaptionMatcher.matchCampaignTag(caption, campaignTag).isPresent()) {
+            item.setCampaignId(campaignId);
+            item.setUnsolicited(false);
+            item.setMatchedTerm("#" + campaignTag);
+            return;
+        }
+
+        if (brand != null) {
+            CaptionMatcher.matchBrandTerms(caption, brand.monitoredHashtags(),
+                            brand.instagramHandle())
+                    .ifPresent(match -> item.setMatchedTerm(match.foundAs()));
+        }
+
+        // No campaign tag: this post is about the brand at best, not about this campaign.
+        if (item.getMatchedTerm() == null && campaignId != null) {
+            item.setCampaignId(null);
+        }
     }
 
     /**
@@ -450,6 +542,7 @@ public class CoverageService {
                 item.getPlatform(), item.getPostType(), item.getContentForm(), item.getUrl(),
                 item.getCaption(), item.getViews(), nz(item.getLikes()), nz(item.getComments()),
                 item.getShares(), item.getSaves(), item.getImpressions(), item.getEr(),
+                item.getMatchedTerm(),
                 item.getStandardizedName(), item.isUnsolicited(), item.getSource(),
                 item.getPostedAt());
     }

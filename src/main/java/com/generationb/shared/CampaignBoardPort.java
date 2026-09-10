@@ -25,6 +25,15 @@ public interface CampaignBoardPort {
     Optional<String> findCampaignName(UUID campaignId);
 
     /**
+     * The campaign's tracking hashtag, which coverage matches against a creator's own posts.
+     *
+     * <p>This is what makes attribution free: Instagram's hashtag search returns posts with no
+     * username, but reading a creator's posts by handle already tells us who they are. All that
+     * is needed is something to look for.
+     */
+    Optional<String> findTrackingHashtag(UUID campaignId);
+
+    /**
      * Adds each creator to the named column of the campaign's board, skipping creators already
      * present. Returns what actually happened.
      */

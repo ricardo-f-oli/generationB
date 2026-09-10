@@ -27,6 +27,15 @@ public class CampaignBoardAdapter implements CampaignBoardPort {
     private final KanbanService kanbanService;
 
     @Override
+    @Transactional(readOnly = true)
+    public Optional<String> findTrackingHashtag(UUID campaignId) {
+        if (campaignId == null) {
+            return Optional.empty();
+        }
+        return campaignRepository.findById(campaignId).map(Campaign::getTrackingHashtag);
+    }
+
+    @Override
     @Transactional
     public Optional<UUID> findOrCreateBoard(UUID campaignId) {
         Campaign campaign = campaignRepository.findByIdAndBrandId(campaignId).orElse(null);

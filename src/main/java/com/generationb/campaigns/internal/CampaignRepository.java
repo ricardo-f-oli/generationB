@@ -12,6 +12,11 @@ import java.util.UUID;
 
 public interface CampaignRepository extends JpaRepository<Campaign, UUID> {
 
+    boolean existsByTrackingHashtag(String trackingHashtag);
+
+    java.util.Optional<Campaign> findByTrackingHashtag(String trackingHashtag);
+
+
     @Query("SELECT c FROM Campaign c WHERE c.brandId = ?#{@brandContext.brandId} AND c.deletedAt IS NULL")
     Page<Campaign> findAllByBrandIdAndDeletedAtIsNull(Pageable pageable);
 

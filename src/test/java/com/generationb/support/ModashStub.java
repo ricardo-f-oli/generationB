@@ -169,7 +169,7 @@ public class ModashStub implements AutoCloseable {
                 """.formatted(credits, rawRequests));
         }
         if (path.startsWith("/raw/ig/")) {
-            return Response.ok(igFeed(nonce));
+            return Response.ok(igFeed(nonce).replace(" #CAMPAIGN_TAG", ""));
         }
         if (path.startsWith("/raw/tiktok/")) {
             return Response.ok(tiktokFeed(nonce));
@@ -201,6 +201,17 @@ public class ModashStub implements AutoCloseable {
      * {@code coverage_items.views} is nullable.
      */
     /** The captured feed with per-run post codes, so URLs are unique across tests. */
+    /**
+     * The feed with a campaign tracking tag substituted into the first caption.
+     *
+     * <p>For attribution tests: a post carrying the campaign's tag is a briefed creator
+     * delivering, and the second post — which carries no tag — must NOT be attributed, because
+     * auto-clipping fetches a creator's posts wholesale and most are about something else.
+     */
+    public static String igFeed(String nonce, String campaignTag) {
+        return igFeed(nonce).replace("#CAMPAIGN_TAG", "#" + campaignTag);
+    }
+
     public static String igFeed(String nonce) {
         return IG_FEED.replace("DcZ1WbThFC5", "DcZ1WbThFC5" + nonce)
                 .replace("DcZ1WbThFC6", "DcZ1WbThFC6" + nonce)
@@ -217,7 +228,7 @@ public class ModashStub implements AutoCloseable {
           {"pk":"3970439184115847353","code":"DcZ1WbThFC5","product_type":"clips","media_type":2,
            "taken_at":1787533205,"like_count":77,"comment_count":32,
            "view_count":null,"play_count":null,"is_paid_partnership":true,
-           "caption":{"text":"Loving this mask #ad"},
+           "caption":{"text":"Loving this mask #ad #CAMPAIGN_TAG"},
            "user":{"pk":"12016731292","username":"stubcreator"}},
           {"pk":"3970439184115847354","code":"DcZ1WbThFC6","product_type":"carousel_container",
            "media_type":8,"taken_at":1787433205,"like_count":53,"comment_count":16,

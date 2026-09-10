@@ -10,6 +10,8 @@ says what it does; these pages say what it is for, what was decided, and where t
 
 | I need to… | Read | Code lives in |
 |---|---|---|
+| Add a creator and get their metrics | [ADDING-A-CREATOR.md](ADDING-A-CREATOR.md) | — |
+| Read creator data without a paid vendor | [integrations/platform-apis.md](integrations/platform-apis.md) | `foundation/insights/Meta*`, `*YouTube*`, `creators/internal/PlatformApi*` |
 | Understand the creator-data vendor | [integrations/modash.md](integrations/modash.md) | `foundation/insights/`, `creators/internal/Modash*` |
 | Set up or debug SendGrid callbacks | [operations/sendgrid-webhooks.md](operations/sendgrid-webhooks.md) | `outreach/api/WebhookController`, `outreach/internal/SendGridSignatureVerifier` |
 | Get email actually delivered | [operations/email-deliverability.md](operations/email-deliverability.md) | `foundation/internal/EmailDnsChecker` |

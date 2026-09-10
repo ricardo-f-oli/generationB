@@ -106,6 +106,51 @@ insights:
     credit-reserve: ${MODASH_CREDIT_RESERVE:2}
     raw-reserve: ${MODASH_RAW_RESERVE:2}
     budget-ttl-seconds: ${MODASH_BUDGET_TTL_SECONDS:120}
+  # ------------------------------------------- straight from the platforms
+  #
+  # The no-vendor route. Meta, Google and TikTok each answer part of what a paid creator-data
+  # vendor does, for nothing, and the provider routes each question to whichever can answer it.
+  #
+  # Setting either credential below selects this automatically — see InsightsProviderCondition.
+  #
+  # What you get, and what you do not:
+  #   Instagram  posts + follower counts for ANY public professional account (Business Discovery)
+  #              hashtag search, capped at 30 unique tags per rolling 7 days PER APP
+  #              audience demographics ONLY for creators who connect their account
+  #   YouTube    everything public, free; demographics only for connected channels
+  #   TikTok     content only, and only for connected creators. NO demographics at any tier
+  #              available to a commercial agency — this is a platform limit, not a config gap.
+  #   Search     none. No platform exposes a creator index, so discovery by description is gone.
+  meta:
+    base-url: ${META_BASE_URL:https://graph.facebook.com}
+    # Pinned. Meta deprecates a version roughly every two years and changes field shapes between
+    # them; finding that out from a production error is worse than from a calendar reminder.
+    api-version: ${META_API_VERSION:v21.0}
+    # A long-lived Page token for the agency's own Facebook Page, linked to the IG Business
+    # account below. Every lookup is made as that account.
+    access-token: ${META_ACCESS_TOKEN:}
+    ig-user-id: ${META_IG_USER_ID:}
+    timeout-seconds: ${META_TIMEOUT_SECONDS:20}
+    min-request-interval-ms: ${META_MIN_INTERVAL_MS:120}
+    # Meta's own figure. Shared across every brand, so it is the binding constraint on mention
+    # discovery rather than a formality.
+    hashtag-limit: ${META_HASHTAG_LIMIT:30}
+    hashtag-reserve: ${META_HASHTAG_RESERVE:2}
+
+  youtube:
+    base-url: ${YOUTUBE_BASE_URL:https://www.googleapis.com/youtube/v3}
+    # A plain API key. No OAuth, no app review, no per-creator permission.
+    api-key: ${YOUTUBE_API_KEY:}
+    timeout-seconds: ${YOUTUBE_TIMEOUT_SECONDS:20}
+    # Google's default. Costs are uneven: a channel or playlist read is 1 unit, a search is 100.
+    daily-quota-units: ${YOUTUBE_DAILY_QUOTA:10000}
+
+  # Creators' OAuth tokens are live credentials for someone else's account, so they are encrypted
+  # at rest rather than hashed — they have to be usable. AES-256-GCM.
+  #   openssl rand -base64 32
+  # Without this, account connections are refused and demographics stay unavailable.
+  token-encryption-key: ${INSIGHTS_TOKEN_ENCRYPTION_KEY:}
+
   enrichment:
     # Audience demographics move over months. Re-buying a report inside this window is waste.
     ttl-days: ${INSIGHTS_TTL_DAYS:30}
