@@ -65,7 +65,6 @@ public interface CreatorLookupPort {
         Integer followersCount,
         java.math.BigDecimal erPercentage,
         java.math.BigDecimal ukAudiencePct,
-        String qualityBand,
         String primaryPlatform,
         String niche
     ) {}
@@ -74,6 +73,9 @@ public interface CreatorLookupPort {
     record FollowerGrowth(UUID creatorId, int startFollowers, int endFollowers, int delta) {}
 
     List<CreatorProfile> profiles(List<UUID> creatorIds);
+
+    /** A creator by handle, case-insensitive and without the {@code @}. */
+    java.util.Optional<CreatorProfile> profileByHandle(String handle);
 
     /** Requirement #15: which creators this brand actually sent to in the window. */
     List<UUID> creatorsSentTo(UUID brandId, UUID campaignId,

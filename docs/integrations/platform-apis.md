@@ -1,8 +1,8 @@
 # Creator data straight from the platforms
 
-The replacement for the paid creator-data vendor. Meta, Google and TikTok each answer part of what
-it did, for nothing, and `PlatformApiCreatorInsightsProvider` routes each question to whichever can
-answer it.
+Where every piece of creator data comes from. There is no paid vendor: Modash was removed in
+September 2026. Meta and Google answer what they will for free, and
+`PlatformApiCreatorInsightsProvider` routes each question to whichever can answer it.
 
 For the client-facing version of this — how to add a creator and what you get — see
 [../ADDING-A-CREATOR.md](../ADDING-A-CREATOR.md).
@@ -18,12 +18,45 @@ YOUTUBE_API_KEY=...          # plain API key, nothing else needed
 INSIGHTS_TOKEN_ENCRYPTION_KEY=$(openssl rand -base64 32)
 ```
 
-`INSIGHTS_PROVIDER` only overrides that — `platform`, `modash` or `mock`. If a vendor key is also
-configured the vendor wins, because it answers strictly more questions and if somebody is paying
-for it, that is what they meant.
+`INSIGHTS_PROVIDER` only overrides that — `platform` or `mock`. With no credential at all the app
+runs on generated sample data and logs every call as `[MOCK INSIGHTS]`.
 
-Startup logs which of the three are live and which are not, because a half-configured integration
+Startup logs which sources are live and which are not, because a half-configured integration
 returns empty results that look identical to "this creator posts nothing".
+
+## Instagram before Meta's approval
+
+Everything stays free, so until Meta approves the app there is no automatic Instagram data:
+follower counts are typed on the creator and posts are logged by hand on the coverage screen
+(likes, comments, views). Engagement rate and reach are calculated from those figures exactly as
+they are for clipped posts.
+
+When the approval arrives, set `META_ACCESS_TOKEN` and `META_IG_USER_ID` in Render and redeploy.
+Instagram lookups go through `foundation/insights/InstagramProfiles`, which maps every source onto
+one `InstagramProfile` shape and one canonical post URL (`https://www.instagram.com/p/{code}/`), so a
+post logged by hand is not logged again when auto-clipping finds it.
+
+## Existing creators, without asking them
+
+The agency's current roster does not have to connect anything to stay up to date. For any creator
+whose primary platform is Instagram and whose account is a public **Business or Creator** account,
+Business Discovery returns follower count, bio and recent posts by handle alone. For any creator
+with a YouTube handle, the Data API returns subscriber count and channel description.
+
+- **Refresh public profile** on a creator's page calls `POST /api/creators/{id}/enrich`.
+- `POST /api/creators/profile-refresh?limit=N` refreshes the N stalest (admin and director).
+- Every day at 06:00 Europe/London, creators with a card on an **ACTIVE** campaign are refreshed
+  (`insights.enrichment.cron`, batch `insights.enrichment.max-batch`), and a follower snapshot is
+  recorded so growth reporting has two points to compare.
+
+`creators.insights_source` records what answered: `INSTAGRAM_PUBLIC`, `YOUTUBE_PUBLIC`,
+`INSTAGRAM_CONNECTED`, or `LEGACY` for figures carried over from Modash. A lookup that returns
+nothing never blanks what is on file.
+
+What this **cannot** give an unconnected creator: audience demographics (UK %, age, gender), anything
+from a personal Instagram account, and anything at all from TikTok. Those are platform rules, not
+missing code. Scraping (instaloader, TikTokApi and similar) breaches the platforms' terms and gets
+accounts banned, so it is deliberately not used.
 
 ## What answers what
 
@@ -47,7 +80,7 @@ switched to a Creator account, and no amount of retrying changes that.
 
 **30 unique tags per rolling 7 days, per app** — shared across every brand, not per brand. That is
 the binding constraint on mention discovery, so `HashtagBudget` treats it exactly as the old
-vendor's credits were treated: tracked in the database (the window is seven days; a restart must
+a metered allowance: tracked in the database (the window is seven days; a restart must
 not appear to reset it), reserved against, and refused rather than silently overspent.
 
 Re-using a tag already inside the window is free, which is why the resolved id is cached. The same
@@ -56,7 +89,7 @@ table is both the ledger and the cache.
 ### Demographics need the creator
 
 Instagram and YouTube report a creator's own audience to an app that creator has authorised.
-Better data than a vendor's model — it is the platform's own — and consented to explicitly by the
+The platform's own figures rather than a model, and consented to explicitly by the
 person it describes, which is a cleaner GDPR position than buying a profile from a broker.
 
 Meta suppresses breakdowns below its reporting minimum, so a small account legitimately returns
@@ -71,8 +104,8 @@ videos and follower counts and nothing else. There is no endpoint for audience a
 location at any tier a commercial agency can reach. The connection model supports TikTok so
 content works; nothing will ever write demographics from it.
 
-**Creator search by description.** The vendor had an index of millions of profiles. Meta indexes
-hashtags, not people. `searchCreators` returns empty and logs why, rather than returning nothing
+**Creator search by description.** No platform offers a creator index. Meta indexes hashtags, not
+people, so search runs against our own database. `searchCreators` returns empty and logs why, rather than returning nothing
 and letting the screen imply nobody matched.
 
 ## Where the code is
@@ -85,7 +118,9 @@ and letting the screen imply nobody matched.
 | `foundation/insights/TokenCipher` | AES-256-GCM for creators' OAuth tokens |
 | `creators/internal/PlatformApiCreatorInsightsProvider` | routing and mapping |
 | `creators/internal/CreatorPlatformConnection` | who has connected what |
-| `creators/internal/InsightsProviderCondition` | which of the three providers registers |
+| `creators/internal/InsightsProviderCondition` | platform APIs or mock |
+| `creators/internal/CreatorEnrichmentService` | refreshing existing creators from public profiles |
+| `creators/internal/CreatorProfileRefreshScheduler` | the daily refresh for active campaigns |
 
 ## Tokens
 

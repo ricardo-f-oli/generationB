@@ -49,7 +49,9 @@ public class MetricsService {
             notes.add("Impressions are not supplied by any connected data source and are therefore not reported.");
         }
         notes.add("Conversion tracking is not configured for this brand, so conversion rate is not reported.");
-        notes.add("Reach is estimated from total views; unique-viewer data is not available.");
+        notes.add("Reach is estimated per post: views where the platform publishes them (YouTube, "
+                + "TikTok), otherwise the creator's follower count when the post was captured "
+                + "(Instagram). Unique-viewer reach needs the creator's own insights.");
 
         // ---- creator-level enrichment -------------------------------------
         List<UUID> creatorIds = breakdown.stream()
@@ -79,7 +81,6 @@ public class MetricsService {
                             c.posts(), c.views(), c.likes(), c.comments(),
                             c.averageEngagementRate(),
                             growthByCreator.get(c.creatorId()),
-                            profile != null ? profile.qualityBand() : null,
                             insightStatus.getOrDefault(c.creatorId(), InsightRequest.PENDING));
                 })
                 .toList();
@@ -101,11 +102,6 @@ public class MetricsService {
             notes.add("Follower growth needs at least two snapshots in the period; none were found.");
         }
 
-        // ---- quality band distribution ------------------------------------
-        Map<String, Long> qualityBands = profiles.values().stream()
-                .map(p -> p.qualityBand() == null ? "Unrated" : p.qualityBand())
-                .collect(Collectors.groupingBy(b -> b, TreeMap::new, Collectors.counting()));
-
         // ---- reconciliation (requirement #15) ------------------------------
         ReportMetrics.Reconciliation reconciliation = reconcile(brandId, campaignId, from, to, insightStatus, profiles);
 
@@ -125,14 +121,13 @@ public class MetricsService {
         return new ReportMetrics(
                 stats.posts(), stats.views(), stats.likes(), stats.comments(),
                 stats.shares(), stats.saves(),
-                stats.views(),                 // estimated reach
+                stats.reach(),                 // estimated reach
                 null,                          // impressions: not measurable
                 stats.averageEngagementRate(),
                 erVsTarget,
                 totalGrowth,
                 growthPct,
                 stats.shortFormPosts(), stats.longFormPosts(), stats.unsolicitedPosts(),
-                qualityBands,
                 null,                          // conversion: not tracked
                 reconciliation,
                 rows,

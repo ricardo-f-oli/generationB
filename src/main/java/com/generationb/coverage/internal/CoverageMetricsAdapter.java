@@ -26,7 +26,7 @@ public class CoverageMetricsAdapter implements CoverageMetricsPort {
         if (p == null || p.getPosts() == null || p.getPosts() == 0) {
             // Nothing captured. Returning nulls rather than zeros so the report can say
             // "not measured" instead of "0%", which would read as a genuine result.
-            return new CoverageStats(0, 0, 0, 0, 0, 0, null, 0, 0, 0, false);
+            return new CoverageStats(0, 0, 0, 0, 0, 0, 0, null, 0, 0, 0, false);
         }
 
         return new CoverageStats(
@@ -36,6 +36,7 @@ public class CoverageMetricsAdapter implements CoverageMetricsPort {
                 nz(p.getComments()),
                 nz(p.getShares()),
                 nz(p.getSaves()),
+                nz(p.getReach()),
                 p.getAvgEr(),
                 nz(p.getShortForm()),
                 nz(p.getLongForm()),

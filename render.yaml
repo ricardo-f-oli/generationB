@@ -8,8 +8,8 @@
 # value is never in this file and never in git.
 #
 # IMPORTANT: a variable absent from this list is not unset, it falls back to the
-# default in application.yml. That is how the creator-data vendor was silently
-# running on generated data in production while the key sat in someone's shell.
+# default in application.yml. That is how production once ran silently on
+# generated creator data while the credential sat in someone's shell.
 services:
   - type: web
     name: generationb-api
@@ -39,14 +39,25 @@ services:
       - key: FRONTEND_URL
         sync: false            # https://<your-app>.vercel.app
 
-      # ------------------------------- creator-data vendor (#10, 11, 25, 26)
+      # ---------------------- creator data, free platform APIs (#10, 11, 26)
       #
-      # The key is all that is needed. A configured key selects the vendor.
+      # No paid vendor. Setting either credential selects the platform APIs;
+      # with neither, the app runs on generated sample data (logged as
+      # [MOCK INSIGHTS]). See docs/integrations/platform-apis.md.
       #
-      # INSIGHTS_PROVIDER is NOT set here on purpose. It exists only to override
-      # that — `mock` to hold a live key without using it. Leaving it unset means
-      # this cannot drift out of step with a key added in the dashboard.
-      - key: MODASH_API_KEY
+      # Instagram: a long-lived Page token for the agency's Facebook Page and
+      # the id of the Instagram Business account linked to it. Business
+      # Discovery and Hashtag Search are made as that account.
+      - key: META_ACCESS_TOKEN
+        sync: false
+      - key: META_IG_USER_ID
+        sync: false
+      # YouTube: a plain Data API v3 key from Google Cloud.
+      - key: YOUTUBE_API_KEY
+        sync: false
+      # Encrypts creators' OAuth tokens once they connect accounts.
+      # `openssl rand -base64 32`. Losing it means creators reconnect.
+      - key: INSIGHTS_TOKEN_ENCRYPTION_KEY
         sync: false
 
       # ----------------------------------------------------------- email

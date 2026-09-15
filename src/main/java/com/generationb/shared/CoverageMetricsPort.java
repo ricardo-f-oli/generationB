@@ -21,6 +21,8 @@ public interface CoverageMetricsPort {
         long comments,
         long shares,
         long saves,
+        /** Sum of per-post estimated reach: views where published, else followers at capture. */
+        long reach,
         /** Null when nothing was captured — the caller must not print 0% as if it were measured. */
         BigDecimal averageEngagementRate,
         long shortFormPosts,

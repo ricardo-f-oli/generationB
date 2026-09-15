@@ -30,6 +30,8 @@ public final class CoverageDtos {
             Long shares,
             Long saves,
             Long impressions,
+            /** Views where published, else followers at capture. Null when neither was known. */
+            Long reach,
             BigDecimal er,
             /**
              * The brand or campaign term found in the caption, as it appeared. Null means the

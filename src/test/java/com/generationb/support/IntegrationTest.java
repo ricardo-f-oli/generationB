@@ -13,6 +13,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.testcontainers.containers.MinIOContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -56,8 +57,11 @@ public abstract class IntegrationTest {
                     .withDatabaseName("generationb")
                     .withReuse(true);
 
+    // Pulled from quay.io: MinIO removed its images from Docker Hub, so `minio/minio` no longer
+    // resolves there and every integration test failed at container start.
     static final MinIOContainer MINIO =
-            new MinIOContainer("minio/minio:RELEASE.2024-06-13T22-53-53Z")
+            new MinIOContainer(DockerImageName.parse("quay.io/minio/minio:RELEASE.2024-06-13T22-53-53Z")
+                    .asCompatibleSubstituteFor("minio/minio"))
                     .withUserName("testaccess")
                     .withPassword("testsecret123")
                     .withReuse(true);

@@ -4,9 +4,10 @@
 
 ## Context
 
-Auto-clipping pulls a creator's posts from Modash's raw feeds. Verified against the live API on
-both a brand account and a creator account, carousels and reels alike: Instagram returns
-`view_count: null` and `play_count: null` on **every** item. It does not publish the number.
+Auto-clipping pulls a creator's recent posts by handle (first from a data vendor's raw feeds, now
+from Instagram Business Discovery). Verified on both a brand account and a creator account,
+carousels and reels alike: no view count comes back for any item. Instagram does not publish the
+number to a third party.
 
 The `coverage_items.views` column was `NOT NULL DEFAULT 0`.
 
@@ -29,7 +30,7 @@ form is a deliberate statement and stays.
 
 A client reading "0 views" concludes the campaign was not seen. That is a different and much worse
 statement than "Instagram does not tell us", and it is the exact class of bug the previous pass
-fixed for impressions. Applying the same treatment to the column the vendor turned out not to fill
+fixed for impressions. Applying the same treatment to the column the platform turned out not to fill
 is consistency, not scope creep.
 
 ## Consequence
@@ -44,5 +45,5 @@ they average `NULLIF(er, 0)`, so an uncomputed row does not drag the mean down.
 
 ## Reversing it
 
-Don't. If a future vendor does supply Instagram view counts, they populate the column and null
+Don't. If a future source does supply Instagram view counts, they populate the column and null
 simply stops appearing. Nothing needs to change.

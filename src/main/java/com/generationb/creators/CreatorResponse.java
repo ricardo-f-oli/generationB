@@ -30,11 +30,10 @@ public record CreatorResponse(
     BigDecimal ukAudiencePct,
     String audienceAgeBand,
     String audienceGenderSplit,
-    String qualityBand,
     /**
-     * Where the four audience fields above came from: {@code MODASH}, or null when a person
-     * typed them. The screen shows it because a measured figure and a guess look identical
-     * otherwise.
+     * Where the measured figures came from ({@code INSTAGRAM_PUBLIC}, {@code YOUTUBE_PUBLIC},
+     * {@code INSTAGRAM_CONNECTED}, {@code LEGACY}), or null when a person typed them. The screen
+     * shows it because a measured figure and a guess look identical otherwise.
      */
     String insightsSource,
     Instant insightsRefreshedAt,

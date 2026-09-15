@@ -94,8 +94,14 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.FORBIDDEN, "ACCESS_DENIED", "Access is denied", request, null);
     }
 
-    @ExceptionHandler(NoHandlerFoundException.class)
-    public ResponseEntity<ErrorResponse> handleNoHandler(NoHandlerFoundException ex, WebRequest request) {
+    /**
+     * Spring 6.1+ reports an unmapped path as {@code NoResourceFoundException} (the static
+     * resource handler is the last resort), not {@code NoHandlerFoundException}. Without it here,
+     * a request to a removed or mistyped endpoint surfaced as a 500 and an error-level log line.
+     */
+    @ExceptionHandler({NoHandlerFoundException.class,
+            org.springframework.web.servlet.resource.NoResourceFoundException.class})
+    public ResponseEntity<ErrorResponse> handleNoHandler(Exception ex, WebRequest request) {
         return build(HttpStatus.NOT_FOUND, "NOT_FOUND", "No endpoint matched this request", request, null);
     }
 

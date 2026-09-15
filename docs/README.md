@@ -3,16 +3,12 @@
 Written for the person who picks this up next and needs to know *why*, not just *what*. The code
 says what it does; these pages say what it is for, what was decided, and where to look.
 
-> Earlier audit reports live alongside this file and are in Portuguese. Everything from
-> September 2026 onward is in English, to match the code comments.
-
 ## Where things are
 
 | I need to… | Read | Code lives in |
 |---|---|---|
 | Add a creator and get their metrics | [ADDING-A-CREATOR.md](ADDING-A-CREATOR.md) | — |
-| Read creator data without a paid vendor | [integrations/platform-apis.md](integrations/platform-apis.md) | `foundation/insights/Meta*`, `*YouTube*`, `creators/internal/PlatformApi*` |
-| Understand the creator-data vendor | [integrations/modash.md](integrations/modash.md) | `foundation/insights/`, `creators/internal/Modash*` |
+| Understand where creator data comes from (free platform APIs) | [integrations/platform-apis.md](integrations/platform-apis.md) | `foundation/insights/`, `creators/internal/PlatformApi*`, `creators/internal/CreatorEnrichmentService` |
 | Set up or debug SendGrid callbacks | [operations/sendgrid-webhooks.md](operations/sendgrid-webhooks.md) | `outreach/api/WebhookController`, `outreach/internal/SendGridSignatureVerifier` |
 | Get email actually delivered | [operations/email-deliverability.md](operations/email-deliverability.md) | `foundation/internal/EmailDnsChecker` |
 | Answer "how long do we keep this?" | [compliance/data-retention.md](compliance/data-retention.md) | `shared/RetentionSweeper`, `*/internal/*Retention*` |
@@ -31,9 +27,9 @@ foundation/   auth, brands, audit, retention orchestration
               ai/       LLM client          (named interface "ai")
               email/    outbound email      (named interface "email")
               storage/  object storage      (named interface "storage")
-              insights/ creator-data vendor (named interface "insights")
+              insights/ Meta Graph + YouTube clients (named interface "insights")
 shared/       ports and events other modules talk through
-creators/     creator database, matching, discovery, enrichment
+creators/     creator database, matching, public profile refresh
 campaigns/    kanban, cards, briefs-in-progress
 briefs/       brief generation and the clause library
 outreach/     email sending, replies, follow-ups
@@ -66,26 +62,26 @@ docker compose up -d
 
 # backend, with the integrations live
 SPRING_PROFILES_ACTIVE=local \
-INSIGHTS_PROVIDER=modash MODASH_API_KEY=... \
+META_ACCESS_TOKEN=... META_IG_USER_ID=... YOUTUBE_API_KEY=... \
 mvn spring-boot:run
 
 # frontend
 cd ../generationBFE && npm run dev
 ```
 
-Without `MODASH_API_KEY` the creator-data features fall back to a mock that logs every response
-as `[MOCK MODASH]`. Without `GROQ_API_KEY` the AI features return a written fallback draft. Both
+Without a Meta or YouTube credential the creator-data features fall back to a mock that logs every
+response as `[MOCK INSIGHTS]`. No paid API is needed for anything. Without `GROQ_API_KEY` the AI features return a written fallback draft. Both
 are deliberate: a fresh clone should run, and it should be obvious when a number is not real.
 
 ## Testing
 
-| Layer | Count | Runs with |
-|---|---|---|
-| Backend unit | 111 | `mvn test` — surefire, no Docker needed |
-| Backend integration | 47 | `mvn verify` — failsafe, needs Docker |
-| Frontend unit | 23 | `npm test` |
-| End-to-end, desktop | 3 | `npx playwright test --project=chromium` |
-| End-to-end, mobile | 34 | `npx playwright test --project=mobile` |
+| Layer | Runs with |
+|---|---|
+| Backend unit | `mvn test` — surefire, no Docker needed |
+| Backend integration | `mvn verify` — failsafe, needs Docker |
+| Frontend unit | `npm test` |
+| End-to-end, desktop | `npx playwright test --project=chromium` |
+| End-to-end, mobile | `npx playwright test --project=mobile` |
 
 ### Why the backend suite is split
 
@@ -96,7 +92,7 @@ fail with `NoClassDefFoundError` — which reads like a compilation error and is
 
 So `mvn package` (what the Dockerfile runs) executes the unit suite only, and `mvn verify` (what
 CI runs) executes both. Nothing is weakened: a broken commit still cannot produce a deployable
-jar, and CI fails the build if the integration suite reports fewer than 40 tests, so it cannot
+jar, and CI fails the build if the integration suite reports fewer than 30 tests, so it cannot
 silently stop running.
 
 `@Tag` is `@Inherited`, so `PerformanceTest` — which extends `IntegrationTest` — picks up the tag
@@ -110,9 +106,11 @@ add a screen.
 
 `npx playwright install webkit` is needed once before the mobile project will run.
 
-### The vendor is never called for real
+### The platforms are never called for real
 
-`support/ModashStub` serves captured Modash responses over a real localhost socket. That keeps
-the transport honest — bearer token, retry on 429, `Retry-After`, the credit guard — while making
-sure a CI run never spends the agency's metered credits. Three levels cover it: `ModashMappingTest`
-(fields), `ModashClientTest` (transport), `ModashIntegrationTest` (request to database).
+`support/PlatformApiStub` serves Graph API and YouTube Data API responses over a real localhost
+socket. That keeps the transport honest — the token in a header rather than the URL, the Business
+Discovery field expansion, error bodies — without any test depending on Meta or Google. Two
+levels cover it: `MetaGraphClientTest` (transport) and `PlatformInsightsIntegrationTest` (request
+to database).
+

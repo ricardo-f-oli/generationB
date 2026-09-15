@@ -6,6 +6,8 @@ import com.generationb.foundation.ApiException;
 import com.generationb.foundation.BrandContext;
 import com.generationb.foundation.BrandLookupPort;
 import com.generationb.foundation.email.EmailSender;
+import com.generationb.foundation.insights.InstagramProfile;
+import com.generationb.shared.CreatorLookupPort;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -44,6 +46,7 @@ public class CoverageService {
     private final CreatorInsightsProvider insightsProvider;
     private final BrandLookupPort brandLookup;
     private final EmailSender emailSender;
+    private final CreatorLookupPort creatorLookup;
 
     // =====================================================================
     // Log (#14)
@@ -65,19 +68,36 @@ public class CoverageService {
     public CoverageItemResponse create(CreateCoverageCommand command) {
         UUID brandId = BrandContext.requireBrandId();
 
-        if (command.url() != null && !command.url().isBlank()
-                && !coverageRepository.findExistingUrls(brandId, List.of(command.url())).isEmpty()) {
+        // Instagram links the same post as /p/, /reel/ or /tv/. One form, so a post logged by
+        // hand is recognised when it is clipped automatically later, and vice versa.
+        String url = blankToNull(command.url());
+        if (url != null && url.contains("instagram.com")) {
+            url = InstagramProfile.canonicalUrl(url);
+        }
+        if (url != null && !coverageRepository.findExistingUrls(brandId, List.of(url)).isEmpty()) {
             throw ApiException.conflict("That post is already in the coverage log.");
         }
+
+        // A post logged by handle is linked to the creator in the database, so it shows in their
+        // report row, and their follower count gives the post an estimated reach where the
+        // platform publishes no views (Instagram).
+        String handle = command.creatorHandle().trim().replaceFirst("^@", "");
+        java.util.Optional<CreatorLookupPort.CreatorProfile> creator = command.creatorId() != null
+                ? creatorLookup.profiles(List.of(command.creatorId())).stream().findFirst()
+                : creatorLookup.profileByHandle(handle);
+        Long authorFollowers = creator.map(CreatorLookupPort.CreatorProfile::followersCount)
+                .filter(followers -> followers > 0)
+                .map(Integer::longValue)
+                .orElse(null);
 
         CoverageItem item = new CoverageItem();
         item.setBrandId(brandId);
         item.setCampaignId(command.campaignId());
-        item.setCreatorId(command.creatorId());
-        item.setCreatorHandle(command.creatorHandle().trim().replaceFirst("^@", ""));
+        item.setCreatorId(creator.map(CreatorLookupPort.CreatorProfile::creatorId).orElse(command.creatorId()));
+        item.setCreatorHandle(handle);
         item.setPlatform(orDefault(command.platform(), "INSTAGRAM").toUpperCase());
         item.setPostType(orDefault(command.postType(), "REEL").toUpperCase());
-        item.setUrl(blankToNull(command.url()));
+        item.setUrl(url);
         item.setCaption(command.caption());
         item.setViews(command.views());
         item.setLikes(nz(command.likes()));
@@ -89,7 +109,15 @@ public class CoverageService {
         item.setPostedAt(command.postedAt() != null ? command.postedAt() : Instant.now());
         item.setSource(CoverageItem.MANUAL);
 
-        finish(item, brandId, null);
+        // The campaign's tracking tag or a brand term in the caption is recorded as the match.
+        if (command.campaignId() != null && command.caption() != null) {
+            String tag = campaignLookup.findTrackingHashtag(command.campaignId()).orElse(null);
+            if (tag != null && CaptionMatcher.matchCampaignTag(command.caption(), tag).isPresent()) {
+                item.setMatchedTerm("#" + tag);
+            }
+        }
+
+        finish(item, brandId, authorFollowers);
         return toResponse(coverageRepository.save(item));
     }
 
@@ -109,8 +137,8 @@ public class CoverageService {
      * Requirement #11: pulls a creator's recent posts from the insights provider and logs
      * anything not already captured.
      *
-     * <p>The provider is currently the mock — the Modash contract is not signed — but the shape
-     * of the call and the dedupe behaviour are what the real one will use.
+     * <p>The provider is the free platform APIs when Instagram or YouTube is configured, and the
+     * mock otherwise; the dedupe behaviour is the same for both.
      */
     @Transactional
     public ClipResult autoClipCreator(UUID creatorId, String creatorHandle, UUID campaignId) {
@@ -296,6 +324,16 @@ public class CoverageService {
      */
     private void finish(CoverageItem item, UUID brandId, Long authorFollowers) {
         item.setContentForm(CoverageItem.formFor(item.getPostType()));
+        if (item.getReach() == null) {
+            // Views are the audience that actually saw the post; where a platform withholds them
+            // (Instagram, to anyone but the account owner) the follower count is the audience it
+            // was published to.
+            if (item.getViews() != null && item.getViews() > 0) {
+                item.setReach(item.getViews());
+            } else if (authorFollowers != null && authorFollowers > 0) {
+                item.setReach(authorFollowers);
+            }
+        }
         if (item.getEr() == null || item.getEr().compareTo(BigDecimal.ZERO) == 0) {
             item.setEr(engagementRate(item, authorFollowers));
         }
@@ -541,7 +579,8 @@ public class CoverageService {
                 item.getId(), item.getCampaignId(), item.getCreatorId(), item.getCreatorHandle(),
                 item.getPlatform(), item.getPostType(), item.getContentForm(), item.getUrl(),
                 item.getCaption(), item.getViews(), nz(item.getLikes()), nz(item.getComments()),
-                item.getShares(), item.getSaves(), item.getImpressions(), item.getEr(),
+                item.getShares(), item.getSaves(), item.getImpressions(), item.getReach(),
+                item.getEr(),
                 item.getMatchedTerm(),
                 item.getStandardizedName(), item.isUnsolicited(), item.getSource(),
                 item.getPostedAt());

@@ -75,6 +75,11 @@ class MergeTokenResolverTest {
         }
 
         @Override
+        public java.util.Optional<CreatorProfile> profileByHandle(String handle) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
         public List<UUID> creatorsSentTo(UUID brandId, UUID campaignId,
                                          java.time.LocalDate from, java.time.LocalDate to) {
             return List.of();

@@ -95,6 +95,13 @@ public class CoverageItem extends BaseEntity {
     @Column(name = "impressions")
     private Long impressions;
 
+    /**
+     * Estimated reach: views where the platform publishes them, otherwise the creator's follower
+     * count when the post was captured. Null when neither was known — never a guessed zero.
+     */
+    @Column(name = "reach")
+    private Long reach;
+
     @Column(name = "er", nullable = false)
     private BigDecimal er = BigDecimal.ZERO;
 

@@ -44,7 +44,7 @@ Event Webhook Requests*.
 
 | Variable | Without it |
 |---|---|
-| `INSIGHTS_PROVIDER=modash` + `MODASH_API_KEY` | Creator discovery, auto-clipping and demographics run on the mock, logged as `[MOCK MODASH]` |
+| `META_ACCESS_TOKEN` + `META_IG_USER_ID`, and/or `YOUTUBE_API_KEY` | Profile refresh and auto-clipping run on the mock, logged as `[MOCK INSIGHTS]`. All free — no paid data vendor |
 | `GROQ_API_KEY` | AI drafting returns a written fallback rather than generated copy |
 | `OUTREACH_SENDGRID_API_KEY` | Nothing is emailed |
 | `SENDGRID_WEBHOOK_PUBLIC_KEY` | Delivery events rejected (see above) |
@@ -62,9 +62,10 @@ in SendGrid at the same time as the deploy, or replies stop arriving.
 - **Outreach email deliverability.** Requirement #28 needs DKIM, SPF and DMARC on the sending
   domain. Mail sends without them; it lands in spam more often than it should. Test the workflow,
   not the inbox placement.
-- **The creator-data allowance.** The account is a trial: roughly 97 discovery credits and 95 raw
-  requests remain. An audience report costs one credit. Fine for a demo; a bulk enrichment of the
-  whole database needs a production plan first. The balance is on screen before anything spends it.
+- **Creator data is free but partial.** Instagram only answers for public Business/Creator
+  accounts, TikTok has no public API at all, and audience demographics (UK %, age, gender) only
+  arrive for creators who connect their account. Existing figures carried over from the old data
+  provider are labelled as such on the creator page.
 - **The fulfilment export** produces a workbook with the columns a courier manifest needs, but not
   EC Group's own template — that needs one real file from them.
 - **Report templates** are ours rather than each brand's, for the same reason.
@@ -72,11 +73,13 @@ in SendGrid at the same time as the deploy, or replies stop arriving.
 ## 5. Sensible order to walk through it
 
 1. Sign in, look at the dashboard **on a phone** — that is new and worth seeing first.
-2. Creators → Discover: search in plain English, add someone, then fetch their demographics.
-   Watch the credit balance move.
+2. Creators → open a creator with a YouTube handle → *Refresh public profile*, then *Clip recent
+   posts*. Subscribers, engagement rate and their latest videos (views, reach, engagement) arrive
+   from YouTube. Instagram data is entered by hand until Meta approves the app.
 3. Campaigns → Brief builder: write a brief, tick some clauses under Terms, download the PDF.
-4. Coverage: clip a creator's posts. Note that Instagram rows read "Not tracked" for views — that
-   is correct, Instagram publishes no view count.
+4. Coverage → *Log a post* for an Instagram creator, with the campaign and a caption carrying the
+   campaign hashtag: reach comes from the creator's followers, engagement rate is calculated.
+   *Check campaign posts* does the same automatically for YouTube creators on the campaign board.
 5. Settings → GDPR & data: read the retention policies, press *Preview what is due*. It changes
    nothing.
 6. Gifting: this is where the insurance control bites. Either add a policy or flip the flag.

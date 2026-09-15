@@ -28,6 +28,7 @@ public interface CoverageMetricsRepository extends JpaRepository<CoverageItem, U
         Long getComments();
         Long getShares();
         Long getSaves();
+        Long getReach();
         BigDecimal getAvgEr();
         Long getShortForm();
         Long getLongForm();
@@ -52,6 +53,7 @@ public interface CoverageMetricsRepository extends JpaRepository<CoverageItem, U
             COALESCE(SUM(comments), 0)                            AS comments,
             COALESCE(SUM(shares), 0)                              AS shares,
             COALESCE(SUM(saves), 0)                               AS saves,
+            COALESCE(SUM(reach), 0)                               AS reach,
             ROUND(AVG(NULLIF(er, 0)), 2)                          AS avgEr,
             COUNT(*) FILTER (WHERE content_form = 'SHORT')        AS shortForm,
             COUNT(*) FILTER (WHERE content_form = 'LONG')         AS longForm,
@@ -97,7 +99,7 @@ public interface CoverageMetricsRepository extends JpaRepository<CoverageItem, U
         WHERE c.brandId = :brandId
           AND c.deletedAt IS NULL
           AND (:campaignId IS NULL OR c.campaignId = :campaignId)
-        ORDER BY c.views DESC
+        ORDER BY c.reach DESC NULLS LAST, c.views DESC NULLS LAST
         """)
     List<CoverageItem> topPosts(@Param("brandId") UUID brandId,
                                 @Param("campaignId") UUID campaignId,

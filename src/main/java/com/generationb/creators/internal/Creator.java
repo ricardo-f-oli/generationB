@@ -81,21 +81,15 @@ public class Creator {
     @Column(name = "audience_gender_split")
     private String audienceGenderSplit;
 
-    @Column(name = "quality_band")
-    private String qualityBand;
-
     /**
-     * Where the four fields above came from: {@code MODASH}, or null when a person typed them.
+     * Where the measured figures on this creator last came from — see
+     * {@link CreatorEnrichmentService} for the values — or null when a person typed them.
      * Without this a reader cannot tell a measured figure from a guess someone made in 2024.
      */
     @Column(name = "insights_source")
     private String insightsSource;
 
-    /** The vendor's own id for this account, so a renamed handle still resolves. */
-    @Column(name = "insights_external_id")
-    private String insightsExternalId;
-
-    /** When the vendor last answered. A report costs a credit, so staleness is checked first. */
+    /** When a platform last answered for this creator. Drives the staleness check. */
     @Column(name = "insights_refreshed_at")
     private Instant insightsRefreshedAt;
 

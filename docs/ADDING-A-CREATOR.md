@@ -1,8 +1,15 @@
 # Adding a creator, and what data you get
 
-The complete flow, and — more usefully — what each route actually gets you. Since moving off the
-paid data vendor, **how a creator enters the database changes what the platform can tell you about
-them.** That is the single most important thing on this page.
+The complete flow, and — more usefully — what each route actually gets you. There is no paid data
+vendor: everything comes from Instagram's and YouTube's own free APIs, so **how a creator enters
+the database changes what the platform can tell you about them.** That is the single most
+important thing on this page.
+
+> **Status, September 2026.** Built and working: adding creators by hand or CSV, *Refresh public
+> profile* on a creator's page, the daily refresh for creators on active campaigns, auto-clipping
+> and campaign-tag attribution. **Not built yet:** the account-connection flow (the *Request
+> connection* button and the creator-facing OAuth screens described below) — it waits on Meta's
+> app review. Until then demographics stay as entered by hand or carried over from the old provider.
 
 ---
 
@@ -14,7 +21,10 @@ them.** That is the single most important thing on this page.
 | **YouTube** | ✅ automatic | ✅ automatic | ⚠️ only if they connect |
 | **TikTok** | ⚠️ only if they connect | ⚠️ only if they connect | ❌ **never** |
 
-"Automatic" means we can read it from a handle alone, with no involvement from the creator.
+"Automatic" means we can read it from a handle alone, with no involvement from the creator — for
+Instagram, only if their account is a public **Business or Creator** account. Press **Refresh
+public profile** on the creator's page, or let the 06:00 daily refresh pick up anyone on an active
+campaign.
 
 **TikTok demographics are not a setting we have not switched on.** TikTok's public API does not
 expose audience age, gender or location to any commercial application, at any price. The creator
@@ -55,7 +65,7 @@ import screen will show you how many of the imported creators have no connection
 
 ### 4. You find them through hashtag monitoring
 
-**Coverage → Find brand mentions**, or **Creators → Discover**.
+**Coverage → Find brand mentions**.
 
 You get: the posts, and the handle. Add them to the database from there and you are in the same
 position as route 2.
@@ -86,11 +96,10 @@ attributed to the campaign, because most of what a creator posts has nothing to 
 
 ---
 
-> **A change worth knowing about.** Searching for creators by *describing* them — "beauty creators
-> in the north of England with a mostly female 25-34 audience" — is gone. That was the data
-> vendor's index of millions of profiles, and no platform offers an equivalent. Instagram indexes
-> hashtags, not people. Discovery now means monitoring the right hashtags and watching who turns
-> up.
+> **A change worth knowing about.** Searching for *new* creators by describing them — "beauty
+> creators in the north of England with a mostly female 25-34 audience" — is not available. No
+> platform offers an index of people; Instagram indexes hashtags. Search runs on the creators
+> already in our database, and new ones arrive through sign-up, import and hashtag monitoring.
 
 ---
 

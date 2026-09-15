@@ -1,11 +1,16 @@
 package com.generationb.creators.internal;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.generationb.creators.CreatorInsightsProvider;
 import com.generationb.foundation.ApiException;
-import com.generationb.foundation.insights.ModashClient;
+import com.generationb.foundation.insights.InstagramProfile;
+import com.generationb.foundation.insights.InstagramProfiles;
+import com.generationb.foundation.insights.TokenCipher;
+import com.generationb.foundation.insights.YouTubeDataClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +19,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -21,22 +27,36 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Requirement #26: fills in a creator's audience demographics from the vendor, which is what
- * turns the KPI matcher's "not known — audience demographics need the creator-data provider"
- * into a real comparison (#55).
+ * Requirement #26: keeps the creators already in the database up to date, for free and without
+ * asking them for anything.
  *
- * <p>Every refresh here costs one Modash credit, so this is deliberately not something a list
- * screen triggers. Three guards keep the bill honest:
+ * <h2>What can be read without the creator's permission</h2>
  *
  * <ul>
- *   <li>A creator enriched inside {@code insights.enrichment.ttl-days} is skipped. Audience
- *       demographics move over months, not hours.
- *   <li>A bulk refresh takes a batch limit, so "refresh everyone" cannot become 400 credits.
- *   <li>{@link ModashClient} refuses any call that would take the account below its reserve.
+ *   <li><b>Instagram</b> — Business Discovery returns follower count, bio and recent posts for any
+ *       public <em>Business or Creator</em> account, looked up by handle and made as the agency's
+ *       own Instagram Business account. Personal accounts return nothing; that is Meta's rule.
+ *   <li><b>YouTube</b> — the Data API returns subscriber count and channel description for any
+ *       public channel with a plain API key.
+ *   <li><b>TikTok</b> — nothing. There is no official public route for a commercial app.
  * </ul>
  *
- * <p>A field the vendor did not answer for is left alone rather than blanked. Overwriting a
- * figure someone researched by hand with a null is a worse outcome than a stale one.
+ * <p>Audience demographics (UK %, age, gender) are never public. They are only filled for a
+ * creator who has connected their Instagram account, through the platform provider.
+ *
+ * <h2>Rules</h2>
+ *
+ * <p>The engagement rate is calculated here, from the posts the platforms return — never bought
+ * from a vendor: (likes + comments) / followers on Instagram, (likes + comments) / views on
+ * YouTube, averaged over the last {@value #RECENT_POSTS} posts. TikTok creators keep whatever was
+ * entered by hand.
+ *
+ * <ul>
+ *   <li>A creator refreshed inside {@code insights.enrichment.ttl-hours} is skipped unless forced.
+ *   <li>A field no source answered for is left alone rather than blanked. A null from a platform
+ *       having a bad day must not overwrite a figure someone researched by hand.
+ *   <li>Bio is only filled when blank: a human's copy is usually better than the profile's.
+ * </ul>
  */
 @Slf4j
 @Service
@@ -56,26 +76,43 @@ public class CreatorEnrichmentService {
         }
     }
 
-    /** What the vendor set, written on the creator so provenance is never ambiguous. */
-    static final String SOURCE_MODASH = "MODASH";
+    /** Which free sources are configured, for the screen that offers the refresh. */
+    public record SourceStatus(boolean live, boolean instagram, boolean youtube, boolean connections,
+                               /** META when Instagram is live; null otherwise. */
+                               String instagramSource) {
+    }
+
+    // Values written to creators.insights_source.
+    static final String SOURCE_INSTAGRAM_PUBLIC = "INSTAGRAM_PUBLIC";
+    static final String SOURCE_YOUTUBE_PUBLIC = "YOUTUBE_PUBLIC";
+    static final String SOURCE_INSTAGRAM_CONNECTED = "INSTAGRAM_CONNECTED";
+
+    private static final int MAX_BIO_LENGTH = 2000;
+
+    /** How many recent posts the engagement rate is averaged over. */
+    static final int RECENT_POSTS = 12;
 
     private final CreatorRepository creatorRepository;
+    private final CreatorFollowerSnapshotRepository snapshotRepository;
+    private final InstagramProfiles instagram;
+    private final YouTubeDataClient youtube;
+    private final TokenCipher tokenCipher;
 
-    /**
-     * Absent whenever {@code insights.provider} is not {@code modash}. Enrichment is the one
-     * feature with no meaningful mock — inventing a UK audience percentage is exactly the
-     * failure this module exists to avoid — so without the vendor it declines instead.
-     */
-    private final ObjectProvider<ModashCreatorInsightsProvider> modashProvider;
+    /** The platform provider when configured, otherwise the mock — whose demographics are fake. */
+    private final CreatorInsightsProvider insightsProvider;
 
-    /** The mock or the real one, whichever is registered. Search degrades; enrichment does not. */
-    private final com.generationb.creators.CreatorInsightsProvider insightsProvider;
-
-    @Value("${insights.enrichment.ttl-days:30}")
-    private int ttlDays;
+    @Value("${insights.enrichment.ttl-hours:20}")
+    private int ttlHours;
 
     @Value("${insights.enrichment.max-batch:25}")
     private int maxBatch;
+
+    public SourceStatus sourceStatus() {
+        boolean instagramLive = instagram.isEnabled();
+        boolean youtubeLive = youtube.isEnabled();
+        return new SourceStatus(instagramLive || youtubeLive, instagramLive, youtubeLive,
+                tokenCipher.isConfigured(), instagram.activeName());
+    }
 
     // =====================================================================
     // One creator
@@ -84,225 +121,268 @@ public class CreatorEnrichmentService {
     @Transactional
     @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
     public EnrichmentResult enrich(UUID creatorId, boolean force) {
+        requireSources();
         Creator creator = creatorRepository.findActiveById(creatorId)
                 .orElseThrow(() -> ApiException.notFound("Creator"));
-        return enrichOne(creator, force, requireProvider());
+        return enrichOne(creator, force);
     }
 
-    private EnrichmentResult enrichOne(Creator creator, boolean force,
-                                       ModashCreatorInsightsProvider provider) {
+    private EnrichmentResult enrichOne(Creator creator, boolean force) {
         if (creator.isAnonymised()) {
             return EnrichmentResult.skipped(creator,
                     "This creator has been anonymised; their profile is not looked up again.");
         }
-        String handle = normalise(creator.getHandle());
-        if (handle == null) {
-            return EnrichmentResult.skipped(creator, "No handle to look the creator up by.");
-        }
         if (!force && isFresh(creator)) {
             return EnrichmentResult.skipped(creator,
                     "Refreshed " + creator.getInsightsRefreshedAt() + "; still within "
-                            + ttlDays + " days.");
+                            + ttlHours + " hours.");
         }
 
-        Optional<Map<String, Object>> report =
-                provider.fetchReport(handle, platformPath(creator.getPrimaryPlatform()));
-        if (report.isEmpty()) {
-            // Could be an unknown handle, a private account, or an exhausted balance. The client
-            // logs which; saying "no data" here rather than inventing one is the point.
-            return EnrichmentResult.skipped(creator,
-                    "The provider returned nothing for @" + handle + ".");
+        String platform = platformOf(creator);
+        List<String> unanswered = new ArrayList<>();
+        String source = null;
+
+        // Instagram: the primary handle is an Instagram handle unless the creator is primarily on
+        // another platform, in which case it is that platform's handle and must not be looked up.
+        if ("INSTAGRAM".equals(platform) && instagram.isEnabled()) {
+            String handle = cleanHandle(creator.getHandle());
+            if (force) {
+                instagram.evict(handle);
+            }
+            // One lookup returns the profile and its recent posts, which is what the engagement
+            // rate is calculated from.
+            Optional<InstagramProfile> profile = instagram.fetch(handle, RECENT_POSTS);
+            if (profile.isPresent()) {
+                applyInstagram(creator, profile.get());
+                source = SOURCE_INSTAGRAM_PUBLIC;
+            } else {
+                unanswered.add("Instagram returned nothing for @" + handle
+                        + " (only public Business and Creator accounts are visible)");
+            }
         }
 
-        apply(creator, report.get());
+        String channel = youtubeChannelOf(creator, platform);
+        if (channel != null && youtube.isEnabled()) {
+            Optional<JsonNode> found = youtube.channel(channel);
+            if (found.isPresent()) {
+                // Subscribers only replace the follower count when YouTube is the primary platform;
+                // otherwise they would overwrite the Instagram figure the rest of the app compares.
+                applyYouTube(creator, found.get(), "YOUTUBE".equals(platform));
+                if ("YOUTUBE".equals(platform)) {
+                    youtubeEngagementRate(found.get()).ifPresent(creator::setErPercentage);
+                }
+                if (source == null) {
+                    source = SOURCE_YOUTUBE_PUBLIC;
+                }
+            } else {
+                unanswered.add("YouTube found no channel " + channel);
+            }
+        }
+
+        if (applyConnectedDemographics(creator)) {
+            source = SOURCE_INSTAGRAM_CONNECTED;
+        }
+
+        if (source == null) {
+            String reason = unanswered.isEmpty()
+                    ? "No free source covers this creator (TikTok has no public API, and no "
+                            + "Instagram or YouTube handle is configured for lookup)."
+                    : String.join("; ", unanswered) + ".";
+            return EnrichmentResult.skipped(creator, reason);
+        }
+
+        creator.setInsightsSource(source);
+        creator.setInsightsRefreshedAt(Instant.now());
         creatorRepository.save(creator);
-        log.info("Enriched creator {} (@{}) from Modash", creator.getId(), handle);
+        captureSnapshot(creator);
+
+        log.info("Refreshed creator {} (@{}) from {}", creator.getId(), creator.getHandle(), source);
         return new EnrichmentResult(creator.getId(), creator.getHandle(), true,
-                "Audience demographics updated.", creator.getInsightsRefreshedAt());
+                "Public profile refreshed.", creator.getInsightsRefreshedAt());
+    }
+
+    private void applyInstagram(Creator creator, InstagramProfile profile) {
+        if (profile.followers() > 0) {
+            setFollowers(creator, (int) Math.min(Integer.MAX_VALUE, profile.followers()));
+            instagramEngagementRate(profile.posts(), profile.followers())
+                    .ifPresent(creator::setErPercentage);
+        }
+        fillBioIfBlank(creator, profile.biography());
     }
 
     /**
-     * Copies what the vendor answered onto the creator.
-     *
-     * <p>Only fields the report actually carried are touched. {@code followersCount} and
-     * {@code erPercentage} are refreshed because they are measurements the vendor is better at
-     * than we are; {@code niche} is only filled when blank, because a human's classification of
-     * a creator is usually better than an interest tag.
+     * Engagement rate on Instagram, calculated by us: (likes + comments) / followers, averaged over
+     * the recent posts. Posts whose owner hid the like count are left out rather than counted as
+     * zero, which would drag the average down for a reason that has nothing to do with engagement.
      */
-    private void apply(Creator creator, Map<String, Object> report) {
-        decimal(report.get("ukAudiencePct")).ifPresent(creator::setUkAudiencePct);
-        string(report.get("topAgeBand")).ifPresent(creator::setAudienceAgeBand);
-        string(report.get("genderSplit")).ifPresent(creator::setAudienceGenderSplit);
-        decimal(report.get("credibilityPct"))
-                .ifPresent(credibility -> creator.setQualityBand(qualityBand(credibility)));
-
-        integer(report.get("followers"))
-                .filter(followers -> followers > 0)
-                .ifPresent(followers -> {
-                    creator.setFollowersCount(followers);
-                    // The stored band was derived from the old count; let it re-derive.
-                    creator.setFollowerBand(null);
-                });
-        decimal(report.get("engagementRatePct")).ifPresent(creator::setErPercentage);
-
-        if (isBlank(creator.getNiche())) {
-            string(report.get("niche")).ifPresent(creator::setNiche);
+    static Optional<BigDecimal> instagramEngagementRate(List<InstagramProfile.Post> posts, long followers) {
+        if (followers <= 0) {
+            return Optional.empty();
         }
-        if (isBlank(creator.getLocation())) {
-            string(report.get("creatorCountry")).ifPresent(creator::setLocation);
+        List<Double> rates = new ArrayList<>();
+        for (InstagramProfile.Post post : posts) {
+            if (post.likes() == null) {
+                continue;
+            }
+            rates.add((post.likes() + post.comments()) * 100.0 / followers);
+            if (rates.size() >= RECENT_POSTS) {
+                break;
+            }
         }
-        string(report.get("externalId")).ifPresent(creator::setInsightsExternalId);
+        return average(rates);
+    }
 
-        creator.setInsightsSource(SOURCE_MODASH);
-        creator.setInsightsRefreshedAt(Instant.now());
+    /**
+     * Engagement rate on YouTube: (likes + comments) / views per video, averaged. YouTube publishes
+     * views, and a video's audience is its viewers rather than the channel's subscribers.
+     */
+    private Optional<BigDecimal> youtubeEngagementRate(JsonNode channel) {
+        String uploads = channel.path("contentDetails").path("relatedPlaylists").path("uploads").asText(null);
+        List<String> videoIds = new ArrayList<>();
+        youtube.recentUploads(uploads, RECENT_POSTS).ifPresent(body -> {
+            for (JsonNode item : body.path("items")) {
+                String id = item.path("contentDetails").path("videoId").asText(null);
+                if (id != null) {
+                    videoIds.add(id);
+                }
+            }
+        });
+        if (videoIds.isEmpty()) {
+            return Optional.empty();
+        }
+        List<Double> rates = new ArrayList<>();
+        youtube.videoStatistics(videoIds).ifPresent(body -> {
+            for (JsonNode video : body.path("items")) {
+                JsonNode stats = video.path("statistics");
+                long views = stats.path("viewCount").asLong(0);
+                if (views > 0) {
+                    long engagements = stats.path("likeCount").asLong(0) + stats.path("commentCount").asLong(0);
+                    rates.add(engagements * 100.0 / views);
+                }
+            }
+        });
+        return average(rates);
+    }
+
+    private static Optional<BigDecimal> average(List<Double> rates) {
+        if (rates.isEmpty()) {
+            return Optional.empty();
+        }
+        double mean = rates.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        return Optional.of(BigDecimal.valueOf(mean).setScale(2, RoundingMode.HALF_UP));
+    }
+
+    private void applyYouTube(Creator creator, JsonNode channel, boolean primary) {
+        JsonNode statistics = channel.path("statistics");
+        // A channel can hide its subscriber count; then the figure is absent, not zero.
+        if (primary && !statistics.path("hiddenSubscriberCount").asBoolean(false)) {
+            int subscribers = statistics.path("subscriberCount").asInt(0);
+            if (subscribers > 0) {
+                setFollowers(creator, subscribers);
+            }
+        }
+        fillBioIfBlank(creator, channel.path("snippet").path("description").asText(null));
+    }
+
+    /**
+     * Demographics for a creator who connected their Instagram. Only the platform provider can
+     * answer; the mock's figures are invented and must never be written onto a real creator.
+     */
+    private boolean applyConnectedDemographics(Creator creator) {
+        if (!(insightsProvider instanceof PlatformApiCreatorInsightsProvider)
+                || !tokenCipher.isConfigured()) {
+            return false;
+        }
+        Map<String, Object> audience = insightsProvider.getAudienceDemographics(creator.getId());
+        if (audience == null || audience.isEmpty()) {
+            return false;
+        }
+        decimal(audience.get("ukAudiencePct")).ifPresent(creator::setUkAudiencePct);
+        string(audience.get("topAgeBand")).ifPresent(creator::setAudienceAgeBand);
+        string(audience.get("genderSplit")).ifPresent(creator::setAudienceGenderSplit);
+        if (audience.get("followers") instanceof Number followers && followers.intValue() > 0) {
+            setFollowers(creator, followers.intValue());
+        }
+        return true;
+    }
+
+    private void setFollowers(Creator creator, int followers) {
+        creator.setFollowersCount(followers);
+        // The stored band was derived from the old count; let it re-derive.
+        creator.setFollowerBand(null);
+    }
+
+    private void fillBioIfBlank(Creator creator, String bio) {
+        if (isBlank(creator.getBio()) && !isBlank(bio)) {
+            String trimmed = bio.trim();
+            creator.setBio(trimmed.length() <= MAX_BIO_LENGTH ? trimmed : trimmed.substring(0, MAX_BIO_LENGTH));
+        }
+    }
+
+    /** Requirement #49: follower growth needs a point in time per refresh, not one mutable number. */
+    private void captureSnapshot(Creator creator) {
+        LocalDate today = LocalDate.now();
+        if (creator.getFollowersCount() != null
+                && !snapshotRepository.existsByCreatorIdAndCapturedOn(creator.getId(), today)) {
+            snapshotRepository.save(CreatorFollowerSnapshot.of(
+                    creator.getId(), creator.getFollowersCount(), creator.getErPercentage()));
+        }
     }
 
     // =====================================================================
     // Many creators
     // =====================================================================
 
-    /**
-     * Refreshes the creators whose figures are oldest, up to {@code limit}.
-     *
-     * <p>Bounded on purpose. "Refresh the whole database" is a sentence that costs one credit per
-     * creator, and the person typing it cannot see the balance.
-     */
+    /** The creators whose public figures are oldest, up to {@code limit}. */
     @Transactional
     @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR')")
     public List<EnrichmentResult> enrichStalest(int limit, boolean force) {
-        ModashCreatorInsightsProvider provider = requireProvider();
+        requireSources();
         int batch = Math.clamp(limit, 1, maxBatch);
-
         List<Creator> candidates = creatorRepository.findStalestForEnrichment(
-                force ? Instant.now() : staleBefore(),
-                org.springframework.data.domain.PageRequest.of(0, batch));
+                force ? Instant.now() : staleBefore(), PageRequest.of(0, batch));
+        return enrichAll(candidates, false);
+    }
 
+    /**
+     * The daily job: creators on ACTIVE campaigns first, bounded by the batch size so one run
+     * stays inside Meta's hourly Business Discovery allowance. No security context — it is called
+     * by the scheduler, not a user.
+     */
+    @Transactional
+    public List<EnrichmentResult> refreshActiveCampaignCreators() {
+        if (!sourceStatus().live()) {
+            return List.of();
+        }
+        return enrichAll(creatorRepository.findStaleOnActiveCampaigns(staleBefore(), maxBatch), false);
+    }
+
+    private List<EnrichmentResult> enrichAll(List<Creator> candidates, boolean force) {
         List<EnrichmentResult> results = new ArrayList<>();
         for (Creator creator : candidates) {
-            results.add(enrichOne(creator, force, provider));
+            try {
+                results.add(enrichOne(creator, force));
+            } catch (RuntimeException e) {
+                // One bad profile must not abandon the rest of the batch.
+                log.warn("Refreshing creator {} failed: {}", creator.getId(), e.getClass().getSimpleName());
+                results.add(EnrichmentResult.skipped(creator, "The lookup failed; try again later."));
+            }
         }
-        log.info("Bulk enrichment: {} of {} creator(s) refreshed",
+        log.info("Profile refresh: {} of {} creator(s) refreshed",
                 results.stream().filter(EnrichmentResult::refreshed).count(), results.size());
         return results;
-    }
-
-    // =====================================================================
-    // Discovery (#23) — finding creators who are not in the database yet
-    // =====================================================================
-
-    /**
-     * Requirement #23: a search that reads a sentence. "Beauty creators in Manchester whose
-     * audience skews 25-34" goes to the vendor's semantic index rather than being matched word
-     * by word against five columns, which is all our own search can do.
-     *
-     * <p>Goes through {@link com.generationb.creators.CreatorInsightsProvider} rather than the
-     * Modash class directly, so the mock still answers when no key is configured.
-     */
-    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
-    public List<Map<String, Object>> discover(String query, String platform, String niche) {
-        List<Map<String, Object>> found = insightsProvider.searchCreators(query, platform, niche);
-        return found.stream().map(this::markIfKnown).toList();
-    }
-
-    /**
-     * Flags the results we already hold, so nobody adds a creator twice or pays for a report on
-     * someone whose demographics are already on file.
-     */
-    private Map<String, Object> markIfKnown(Map<String, Object> row) {
-        Object handle = row.get("handle");
-        if (handle == null) {
-            return row;
-        }
-        Map<String, Object> enriched = new java.util.LinkedHashMap<>(row);
-        creatorRepository.findByHandleIgnoreCase(String.valueOf(handle))
-                .ifPresent(existing -> {
-                    enriched.put("existingCreatorId", existing.getId());
-                    enriched.put("alreadyInDatabase", true);
-                });
-        return enriched;
-    }
-
-    /**
-     * Requirement #25: who is posting about a competitor.
-     *
-     * <p>Runs the same mention sweep as the coverage screen but points it at somebody else's
-     * hashtag, and — the important part — the results are <em>not</em> written to the coverage
-     * log. A competitor's posts are a signal about which creators to approach, not coverage the
-     * client earned; filing them as the client's own would inflate every report they receive.
-     *
-     * <p>Grouped by creator rather than listed by post, because the question being asked is
-     * "who should we talk to", not "what was posted".
-     */
-    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
-    public List<Map<String, Object>> competitorMentions(String term, int limit) {
-        if (term == null || term.isBlank()) {
-            throw ApiException.badRequest("Give a competitor hashtag or handle to search for.");
-        }
-
-        Map<String, Map<String, Object>> byCreator = new java.util.LinkedHashMap<>();
-        for (Map<String, Object> post : insightsProvider.getMentions(term.trim(), Math.clamp(limit, 1, 60))) {
-            Object handle = post.get("handle");
-            if (handle == null || String.valueOf(handle).isBlank()) {
-                continue;
-            }
-            Map<String, Object> row = byCreator.computeIfAbsent(String.valueOf(handle), key -> {
-                Map<String, Object> created = new java.util.LinkedHashMap<>();
-                created.put("handle", key);
-                created.put("name", key);
-                created.put("platform", post.getOrDefault("platform", "INSTAGRAM"));
-                created.put("followers", 0);
-                created.put("posts", 0);
-                created.put("engagements", 0L);
-                created.put("mention", post.get("mention"));
-                created.put("latestUrl", post.get("url"));
-                return created;
-            });
-            row.put("posts", (Integer) row.get("posts") + 1);
-            row.put("engagements", (Long) row.get("engagements")
-                    + asLong(post.get("likes")) + asLong(post.get("comments")));
-        }
-
-        return byCreator.values().stream().map(this::markIfKnown).toList();
-    }
-
-    private static long asLong(Object value) {
-        return value instanceof Number number ? number.longValue() : 0L;
-    }
-
-    /**
-     * Free handle lookup. Confirms a pasted handle resolves to a real account before anything
-     * spends a credit on it.
-     */
-    @PreAuthorize("hasAnyRole('ADMIN', 'DIRECTOR', 'ACCOUNT_MANAGER', 'ACCOUNT_EXECUTIVE')")
-    public List<Map<String, Object>> lookup(String query, String platform, int limit) {
-        return requireProvider().lookupHandles(query, platform, limit).stream()
-                .map(this::markIfKnown)
-                .toList();
-    }
-
-    /** What the account has left, for the screen that spends it. */
-    public Optional<ModashClient.Budget> budget() {
-        return modashProvider.getIfAvailable() == null
-                ? Optional.empty()
-                : requireProvider().budget();
-    }
-
-    public boolean isLive() {
-        return modashProvider.getIfAvailable() != null;
     }
 
     // =====================================================================
     // Helpers
     // =====================================================================
 
-    private ModashCreatorInsightsProvider requireProvider() {
-        ModashCreatorInsightsProvider provider = modashProvider.getIfAvailable();
-        if (provider == null) {
+    private void requireSources() {
+        if (!sourceStatus().live()) {
             throw ApiException.unprocessable(
-                    "Audience demographics need the creator-data provider. Set a Modash API key "
-                            + "and insights.provider=modash, then try again.");
+                    "Profile refresh needs Instagram or YouTube configured on the server: set "
+                            + "META_ACCESS_TOKEN and META_IG_USER_ID, or YOUTUBE_API_KEY.");
         }
-        return provider;
     }
 
     private boolean isFresh(Creator creator) {
@@ -311,40 +391,31 @@ public class CreatorEnrichmentService {
     }
 
     private Instant staleBefore() {
-        return Instant.now().minus(Duration.ofDays(ttlDays));
+        return Instant.now().minus(Duration.ofHours(ttlHours));
     }
 
-    /**
-     * Modash's credibility score is the share of the audience that looks like a real person.
-     * The bands are the ones the creator screen already displays.
-     */
-    private static String qualityBand(BigDecimal credibilityPct) {
-        if (credibilityPct.compareTo(BigDecimal.valueOf(85)) >= 0) return "HIGH";
-        if (credibilityPct.compareTo(BigDecimal.valueOf(70)) >= 0) return "MEDIUM";
-        return "LOW";
+    private static String platformOf(Creator creator) {
+        String platform = creator.getPrimaryPlatform();
+        return platform == null || platform.isBlank() ? "INSTAGRAM" : platform.trim().toUpperCase();
     }
 
-    private static String platformPath(String platform) {
-        if (platform == null) {
-            return "instagram";
+    private static String youtubeChannelOf(Creator creator, String platform) {
+        String channel = cleanHandle(creator.getYoutubeHandle());
+        if (channel == null && "YOUTUBE".equals(platform)) {
+            channel = cleanHandle(creator.getHandle());
         }
-        return switch (platform.toUpperCase()) {
-            case "TIKTOK" -> "tiktok";
-            case "YOUTUBE" -> "youtube";
-            default -> "instagram";
-        };
+        if (channel == null) {
+            return null;
+        }
+        // A channel id (UC…) is used as-is; anything else is a handle, which YouTube writes with @.
+        return channel.startsWith("UC") && channel.length() == 24 ? channel : "@" + channel;
     }
 
     private static Optional<BigDecimal> decimal(Object value) {
         if (value instanceof Number number) {
-            return Optional.of(BigDecimal.valueOf(number.doubleValue())
-                    .setScale(2, RoundingMode.HALF_UP));
+            return Optional.of(BigDecimal.valueOf(number.doubleValue()).setScale(2, RoundingMode.HALF_UP));
         }
         return Optional.empty();
-    }
-
-    private static Optional<Integer> integer(Object value) {
-        return value instanceof Number number ? Optional.of(number.intValue()) : Optional.empty();
     }
 
     private static Optional<String> string(Object value) {
@@ -355,7 +426,7 @@ public class CreatorEnrichmentService {
         return text.isEmpty() ? Optional.empty() : Optional.of(text);
     }
 
-    private static String normalise(String handle) {
+    private static String cleanHandle(String handle) {
         if (handle == null || handle.isBlank()) {
             return null;
         }

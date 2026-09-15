@@ -491,7 +491,6 @@ public class CreatorService {
                 creator.getUkAudiencePct(),
                 creator.getAudienceAgeBand(),
                 creator.getAudienceGenderSplit(),
-                creator.getQualityBand(),
                 creator.getInsightsSource(),
                 creator.getInsightsRefreshedAt(),
                 creator.getOptInStatus(),

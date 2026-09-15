@@ -23,7 +23,14 @@
         <jjwt.version>0.12.6</jjwt.version>
         <openpdf.version>2.0.3</openpdf.version>
         <poi.version>5.3.0</poi.version>
-        <testcontainers.version>1.20.4</testcontainers.version>
+        <!--
+          1.21.4 or later: Docker Engine 29 (now on GitHub's runners) refuses the old API version
+          earlier releases negotiate, and every integration test failed with "Could not find a
+          valid Docker environment".
+        -->
+        <testcontainers.version>1.21.4</testcontainers.version>
+        <!-- Empty default so @{argLine} resolves when no coverage agent sets it. -->
+        <argLine></argLine>
         <!-- Cloudflare R2 speaks the S3 API, so the standard AWS SDK drives it. -->
         <awssdk.version>2.29.29</awssdk.version>
     </properties>
@@ -235,6 +242,24 @@
     <build>
         <plugins>
             <!--
+              Exposes each dependency's jar path as a property, so Mockito can be loaded as a
+              -javaagent below. JDK 21 warns about (and some JVMs refuse) agents that attach
+              themselves at runtime, which is what Mockito does otherwise; the integration
+              suite failed with "Could not self-attach to current VM" because of it.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>properties</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
               Surefire runs the unit suite. Integration tests need a real Postgres and object
               store via Testcontainers, so they are excluded here and run by failsafe below.
 
@@ -247,6 +272,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
+                    <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
                     <excludedGroups>performance,integration</excludedGroups>
                 </configuration>
             </plugin>
@@ -261,6 +287,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <configuration>
+                    <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
                     <groups>integration</groups>
                     <!--
                       PerformanceTest extends IntegrationTest, so @Tag is inherited and it lands

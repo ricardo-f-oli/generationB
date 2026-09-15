@@ -9,14 +9,14 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * The stand-in used before the Modash key arrived, and still the provider whenever no vendor key
- * is configured — a fresh clone gets a working demo rather than an empty screen.
+ * Generated sample data, used whenever no Instagram or YouTube credential is configured, so a
+ * fresh clone gets a working demo rather than an empty screen.
  *
- * <p>Also selected when {@code insights.provider=mock} is set explicitly, which is how you hold a
- * live key without using it yet.
+ * <p>Also selected when {@code insights.provider=mock} is set explicitly, which is how you hold
+ * real credentials without using them yet.
  *
- * <p>Every response is logged as {@code [MOCK MODASH]} so nobody mistakes generated numbers for
- * a client's real coverage. {@link ModashCreatorInsightsProvider} is the live one.
+ * <p>Every response is logged as {@code [MOCK INSIGHTS]} so nobody mistakes generated numbers for
+ * a client's real coverage. {@link PlatformApiCreatorInsightsProvider} is the live one.
  */
 @Slf4j
 @Component
@@ -25,7 +25,7 @@ public class MockCreatorInsightsProvider implements CreatorInsightsProvider {
 
     @Override
     public List<Map<String, Object>> searchCreators(String criteriaQuery, String platform, String niche) {
-        log.info("[MOCK MODASH] Searching creators criteriaQuery: {}, platform: {}, niche: {}", criteriaQuery, platform, niche);
+        log.info("[MOCK INSIGHTS] Searching creators criteriaQuery: {}, platform: {}, niche: {}", criteriaQuery, platform, niche);
         return List.of(
                 Map.of(
                         "handle", "sophiabeauty",
@@ -50,7 +50,7 @@ public class MockCreatorInsightsProvider implements CreatorInsightsProvider {
 
     @Override
     public List<Map<String, Object>> getRecentActivity(UUID creatorId) {
-        log.info("[MOCK MODASH] Fetching recent activity for creatorId: {}", creatorId);
+        log.info("[MOCK INSIGHTS] Fetching recent activity for creatorId: {}", creatorId);
         return List.of(
                 Map.of(
                         "id", UUID.randomUUID().toString(),
@@ -79,7 +79,7 @@ public class MockCreatorInsightsProvider implements CreatorInsightsProvider {
 
     @Override
     public Map<String, Object> getAudienceDemographics(UUID creatorId) {
-        log.info("[MOCK MODASH] Fetching audience demographics for creatorId: {}", creatorId);
+        log.info("[MOCK INSIGHTS] Fetching audience demographics for creatorId: {}", creatorId);
         return Map.of(
                 "topLocation", "United Kingdom (68%)",
                 "topAgeBand", "18-24 (45%), 25-34 (38%)",
@@ -90,7 +90,7 @@ public class MockCreatorInsightsProvider implements CreatorInsightsProvider {
 
     @Override
     public List<Map<String, Object>> getMentions(String brandOrHashtag, int limit) {
-        log.info("[MOCK MODASH] Searching mentions for: {}", brandOrHashtag);
+        log.info("[MOCK INSIGHTS] Searching mentions for: {}", brandOrHashtag);
         return List.of(
                 Map.of(
                         "handle", "ellafashion",

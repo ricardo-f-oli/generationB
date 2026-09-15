@@ -16,7 +16,6 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * YouTube Data API v3.
@@ -39,26 +38,18 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>That 100× difference is the whole design. Reading a channel's uploads through its uploads
  * playlist costs 2 units; doing the same thing through search costs 100. Fifty sweeps a day
  * either way is 100 units or 5,000. So this deliberately never uses search where a playlist will
- * do, and the daily counter below exists to make the spend visible rather than a surprise at
- * 4pm when everything starts returning 403.
+ * do.
+ *
+ * <p>There is no local quota counter. One held in memory reset on every restart — and a free-tier
+ * instance restarts whenever it sleeps — so it guarded nothing. Google is the authority: a
+ * {@code quotaExceeded} answer is logged with what it means and the call returns empty.
  */
 @Slf4j
 @Service
 public class YouTubeDataClient {
 
-    private static final int COST_CHEAP = 1;
-    private static final int COST_SEARCH = 100;
-
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
-
-    /**
-     * Units spent today, reset on the first call after midnight Pacific — which is when Google
-     * resets, not midnight local. An estimate: Google is the authority, and a 403 quota error is
-     * still handled. It exists so the log can say "we spent 9,000 units" before that happens.
-     */
-    private final AtomicInteger unitsSpentToday = new AtomicInteger();
-    private volatile java.time.LocalDate quotaDay = pacificToday();
 
     @Value("${insights.youtube.base-url:https://www.googleapis.com/youtube/v3}")
     private String baseUrl;
@@ -69,10 +60,6 @@ public class YouTubeDataClient {
     @Value("${insights.youtube.timeout-seconds:20}")
     private int timeoutSeconds;
 
-    /** Google's default. Raised on request through the Cloud console. */
-    @Value("${insights.youtube.daily-quota-units:10000}")
-    private int dailyQuotaUnits;
-
     public YouTubeDataClient(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
@@ -82,11 +69,6 @@ public class YouTubeDataClient {
 
     public boolean isEnabled() {
         return apiKey != null && !apiKey.isBlank();
-    }
-
-    public int unitsSpentToday() {
-        rollQuotaDay();
-        return unitsSpentToday.get();
     }
 
     // =====================================================================
@@ -104,26 +86,28 @@ public class YouTubeDataClient {
         }
 
         // A channel id is the only unambiguous form, and it is recognisable on sight.
-        String parameter = cleaned.startsWith("UC") && cleaned.length() == 24 ? "id"
-                : cleaned.startsWith("@") ? "forHandle"
-                : "forUsername";
+        if (cleaned.startsWith("UC") && cleaned.length() == 24) {
+            return channelBy("id", cleaned);
+        }
 
-        Optional<JsonNode> found = get("channels", Map.of(
-                "part", "snippet,statistics,contentDetails",
-                parameter, cleaned), COST_CHEAP)
-                .map(body -> body.path("items").path(0))
-                .filter(item -> !item.isMissingNode() && !item.isEmpty());
-
-        // A bare name might be a handle rather than a legacy username; those were retired, so
-        // this second attempt is usually the one that works.
-        if (found.isEmpty() && "forUsername".equals(parameter)) {
-            return get("channels", Map.of(
-                    "part", "snippet,statistics,contentDetails",
-                    "forHandle", "@" + cleaned), COST_CHEAP)
-                    .map(body -> body.path("items").path(0))
-                    .filter(item -> !item.isMissingNode() && !item.isEmpty());
+        // Anything else is tried as a handle FIRST. Legacy usernames were retired, and the same
+        // bare name can belong to a different, abandoned channel: "mkbhd" as a username is an old
+        // channel with six videos from 2011, while @mkbhd is the 21M-subscriber one. Asking for
+        // the username first clipped the wrong creator's posts.
+        String handle = cleaned.startsWith("@") ? cleaned : "@" + cleaned;
+        Optional<JsonNode> found = channelBy("forHandle", handle);
+        if (found.isEmpty() && !cleaned.startsWith("@")) {
+            return channelBy("forUsername", cleaned);
         }
         return found;
+    }
+
+    private Optional<JsonNode> channelBy(String parameter, String value) {
+        return get("channels", Map.of(
+                "part", "snippet,statistics,contentDetails",
+                parameter, value))
+                .map(body -> body.path("items").path(0))
+                .filter(item -> !item.isMissingNode() && !item.isEmpty());
     }
 
     /**
@@ -141,7 +125,7 @@ public class YouTubeDataClient {
         return get("playlistItems", Map.of(
                 "part", "snippet,contentDetails",
                 "playlistId", uploadsPlaylistId,
-                "maxResults", String.valueOf(Math.clamp(limit, 1, 50))), COST_CHEAP);
+                "maxResults", String.valueOf(Math.clamp(limit, 1, 50))));
     }
 
     /** View, like and comment counts for videos, up to 50 ids in one call for 1 unit. */
@@ -150,8 +134,7 @@ public class YouTubeDataClient {
             return Optional.empty();
         }
         String ids = String.join(",", videoIds.subList(0, Math.min(videoIds.size(), 50)));
-        return get("videos", Map.of("part", "statistics,snippet,contentDetails", "id", ids),
-                COST_CHEAP);
+        return get("videos", Map.of("part", "statistics,snippet,contentDetails", "id", ids));
     }
 
     /**
@@ -174,26 +157,19 @@ public class YouTubeDataClient {
         if (publishedAfter != null) {
             params.put("publishedAfter", publishedAfter.toString());
         }
-        return get("search", params, COST_SEARCH);
+        return get("search", params);
     }
 
     // =====================================================================
 
-    private Optional<JsonNode> get(String path, Map<String, String> query, int costUnits) {
-        rollQuotaDay();
-        if (unitsSpentToday.get() + costUnits > dailyQuotaUnits) {
-            log.warn("YouTube quota guard: {} units spent today of {}; declining a {}-unit call "
-                    + "to {}", unitsSpentToday.get(), dailyQuotaUnits, costUnits, path);
-            return Optional.empty();
-        }
-
-        Map<String, String> params = new LinkedHashMap<>(query);
-        params.put("key", apiKey);
-
+    private Optional<JsonNode> get(String path, Map<String, String> query) {
         try {
+            // The key goes in a header rather than the query string, so it never lands in a
+            // proxy log alongside the URL.
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/" + path + queryString(params)))
+                    .uri(URI.create(baseUrl + "/" + path + queryString(query)))
                     .header("Accept", "application/json")
+                    .header("X-Goog-Api-Key", apiKey)
                     .timeout(Duration.ofSeconds(timeoutSeconds))
                     .GET()
                     .build();
@@ -205,16 +181,12 @@ public class YouTubeDataClient {
                 logError(path, response);
                 return Optional.empty();
             }
-            // Counted on success only. Google does not charge for a failed request, and counting
-            // failures would have the guard shut everything down during an outage.
-            unitsSpentToday.addAndGet(costUnits);
             return Optional.of(objectMapper.readTree(response.body()));
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return Optional.empty();
         } catch (Exception e) {
-            // The URL carries the API key.
             log.warn("YouTube {} failed: {}", path, e.getClass().getSimpleName());
             return Optional.empty();
         }
@@ -238,23 +210,6 @@ public class YouTubeDataClient {
         } catch (Exception e) {
             log.warn("YouTube {} returned {}", path, response.statusCode());
         }
-    }
-
-    /** Google's quota resets at midnight Pacific, not local midnight or UTC. */
-    private void rollQuotaDay() {
-        java.time.LocalDate today = pacificToday();
-        if (!today.equals(quotaDay)) {
-            synchronized (this) {
-                if (!today.equals(quotaDay)) {
-                    quotaDay = today;
-                    unitsSpentToday.set(0);
-                }
-            }
-        }
-    }
-
-    private static java.time.LocalDate pacificToday() {
-        return java.time.LocalDate.now(java.time.ZoneId.of("America/Los_Angeles"));
     }
 
     private static String queryString(Map<String, String> query) {

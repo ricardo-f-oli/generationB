@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.generationb.creators.CreatorInsightsProvider;
 import com.generationb.foundation.BrandContext;
 import com.generationb.foundation.insights.HashtagBudget;
+import com.generationb.foundation.insights.InstagramProfile;
+import com.generationb.foundation.insights.InstagramProfiles;
 import com.generationb.foundation.insights.MetaGraphClient;
 import com.generationb.foundation.insights.TokenCipher;
 import com.generationb.foundation.insights.YouTubeDataClient;
@@ -76,6 +78,7 @@ public class PlatformApiCreatorInsightsProvider implements CreatorInsightsProvid
     private static final int MAX_HASHTAGS_PER_SWEEP = 2;
 
     private final MetaGraphClient meta;
+    private final InstagramProfiles instagram;
     private final YouTubeDataClient youtube;
     private final HashtagBudget hashtagBudget;
     private final CreatorRepository creatorRepository;
@@ -91,7 +94,8 @@ public class PlatformApiCreatorInsightsProvider implements CreatorInsightsProvid
         List<String> live = new ArrayList<>();
         List<String> missing = new ArrayList<>();
 
-        (meta.isEnabled() ? live : missing).add("Instagram (Meta Graph)");
+        (instagram.isEnabled() ? live : missing).add("Instagram profiles and posts (Meta Graph)");
+        (meta.isEnabled() ? live : missing).add("Instagram hashtag search and demographics (Meta Graph)");
         (youtube.isEnabled() ? live : missing).add("YouTube (Data API)");
         (tokenCipher.isConfigured() ? live : missing).add("account connections (demographics)");
 
@@ -137,21 +141,25 @@ public class PlatformApiCreatorInsightsProvider implements CreatorInsightsProvid
      * nothing, and that is a property of their account rather than a fault here.
      */
     private List<Map<String, Object>> instagramPosts(Creator creator) {
-        String handle = handleOf(creator.getHandle());
-        if (handle == null || !meta.isEnabled()) {
+        if (!instagram.isEnabled() || !isInstagramCreator(creator)) {
             return List.of();
         }
-        return meta.businessDiscoveryMedia(handle, 25)
-                .map(node -> {
-                    long followers = node.path("followers_count").asLong(
-                            creator.getFollowersCount() == null ? 0 : creator.getFollowersCount());
-                    return mapInstagramMedia(node.path("media").path("data"), handle, followers);
-                })
+        return instagram.fetch(creator.getHandle(), 25)
+                .map(this::mapInstagramProfile)
                 .orElseGet(() -> {
-                    log.info("Instagram returned nothing for @{} — not a professional account, "
-                            + "or the handle has changed", handle);
+                    log.info("Instagram returned nothing for @{} via {}", creator.getHandle(),
+                            instagram.activeName());
                     return List.of();
                 });
+    }
+
+    /**
+     * The primary handle is an Instagram handle unless the creator is primarily somewhere else.
+     * Looking a YouTube handle up on Instagram would clip a stranger's posts.
+     */
+    private static boolean isInstagramCreator(Creator creator) {
+        String platform = creator.getPrimaryPlatform();
+        return platform == null || platform.isBlank() || "INSTAGRAM".equalsIgnoreCase(platform.trim());
     }
 
     /** YouTube, entirely public. Two cheap calls rather than one expensive search. */
@@ -373,37 +381,31 @@ public class PlatformApiCreatorInsightsProvider implements CreatorInsightsProvid
     // Mapping
     // =====================================================================
 
-    /**
-     * Instagram media to the shape {@code CoverageService.ingest} reads.
-     *
-     * <p>No view count is set for images or carousels — Instagram does not report one — so the
-     * absent key becomes "not tracked" downstream rather than a fabricated zero. Reels do carry
-     * plays on a connected account but not through Business Discovery, so the engagement rate is
-     * computed against followers, which is the convention on Instagram anyway.
-     */
-    private List<Map<String, Object>> mapInstagramMedia(JsonNode media, String handle, long followers) {
+    /** Instagram posts to the shape {@code CoverageService.ingest} reads, whichever source answered. */
+    private List<Map<String, Object>> mapInstagramProfile(InstagramProfile profile) {
         List<Map<String, Object>> out = new ArrayList<>();
-        if (!media.isArray()) {
-            return out;
-        }
-        for (JsonNode item : media) {
+        for (InstagramProfile.Post item : profile.posts()) {
             if (out.size() >= MAX_ITEMS) {
                 break;
             }
             Map<String, Object> post = new LinkedHashMap<>();
-            post.put("id", item.path("id").asText(null));
+            post.put("id", item.id());
             post.put("platform", "INSTAGRAM");
-            post.put("postType", instagramPostType(
-                    item.path("media_product_type").asText(""), item.path("media_type").asText("")));
-            post.put("handle", handle);
-            post.put("url", item.path("permalink").asText(null));
-            post.put("caption", truncate(item.path("caption").asText(null)));
-            post.put("likes", item.path("like_count").asLong(0));
-            post.put("comments", item.path("comments_count").asLong(0));
-            if (followers > 0) {
-                post.put("authorFollowers", followers);
+            post.put("postType", item.postType());
+            post.put("handle", profile.username());
+            post.put("url", item.url());
+            post.put("caption", truncate(item.caption()));
+            post.put("likes", item.likes() == null ? 0L : item.likes());
+            post.put("comments", item.comments());
+            // Only present when the source reports one. An absent key
+            // becomes "not tracked" downstream rather than a fabricated zero.
+            if (item.views() != null) {
+                post.put("views", item.views());
             }
-            post.put("postedAt", isoOrNow(item.path("timestamp").asText(null)));
+            if (profile.followers() > 0) {
+                post.put("authorFollowers", profile.followers());
+            }
+            post.put("postedAt", item.postedAt() == null ? Instant.now().toString() : item.postedAt().toString());
             out.add(post);
         }
         return out;

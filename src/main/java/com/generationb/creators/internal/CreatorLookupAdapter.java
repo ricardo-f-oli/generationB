@@ -161,7 +161,7 @@ public class CreatorLookupAdapter implements CreatorLookupPort {
         return creatorRepository.findAllActiveByIds(creatorIds).stream()
                 .map(c -> new CreatorProfile(
                         c.getId(), c.getHandle(), c.getName(), c.getFollowersCount(),
-                        c.getErPercentage(), c.getUkAudiencePct(), c.getQualityBand(),
+                        c.getErPercentage(), c.getUkAudiencePct(),
                         c.getPrimaryPlatform(), c.getNiche()))
                 .toList();
     }
@@ -193,6 +193,20 @@ public class CreatorLookupAdapter implements CreatorLookupPort {
                     return new FollowerGrowth(row.getCreatorId(), start, end, end - start);
                 })
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public java.util.Optional<CreatorProfile> profileByHandle(String handle) {
+        if (handle == null || handle.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        return creatorRepository.findByHandleIgnoreCase(handle.trim().replaceFirst("^@", ""))
+                .filter(c -> c.getDeletedAt() == null)
+                .map(c -> new CreatorProfile(
+                        c.getId(), c.getHandle(), c.getName(), c.getFollowersCount(),
+                        c.getErPercentage(), c.getUkAudiencePct(),
+                        c.getPrimaryPlatform(), c.getNiche()));
     }
 
     @Override

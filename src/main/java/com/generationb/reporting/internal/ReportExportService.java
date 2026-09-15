@@ -193,7 +193,7 @@ public class ReportExportService {
             Sheet creators = workbook.createSheet("Creator breakdown");
             Row head = creators.createRow(0);
             String[] columns = {"Creator", "Posts", "Views", "Likes", "Comments", "ER %",
-                                "Follower growth", "Quality", "Insights"};
+                                "Follower growth", "Insights"};
             for (int i = 0; i < columns.length; i++) {
                 Cell c = head.createCell(i);
                 c.setCellValue(columns[i]);
@@ -210,8 +210,7 @@ public class ReportExportService {
                 line.createCell(5).setCellValue(row.engagementRate() == null
                         ? 0d : row.engagementRate().doubleValue());
                 line.createCell(6).setCellValue(row.followerGrowth() == null ? 0 : row.followerGrowth());
-                line.createCell(7).setCellValue(row.qualityBand() == null ? "" : row.qualityBand());
-                line.createCell(8).setCellValue(row.insightStatus() == null ? "" : row.insightStatus());
+                line.createCell(7).setCellValue(row.insightStatus() == null ? "" : row.insightStatus());
             }
             for (int i = 0; i < columns.length; i++) {
                 creators.autoSizeColumn(i);

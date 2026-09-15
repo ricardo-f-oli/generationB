@@ -74,8 +74,32 @@ public interface CreatorRepository extends JpaRepository<Creator, UUID> {
     List<Creator> findAllActiveByIds(@Param("ids") List<UUID> ids);
 
     /**
-     * Requirement #26: the creators whose audience figures are most out of date, never-enriched
-     * first. Ordered so a bounded batch spends its credits where they buy the most.
+     * The daily refresh (M-14): creators with a card on an ACTIVE campaign whose public figures
+     * are stale, never-refreshed first. Those are the ones reports and coverage are being built
+     * on right now, so they are refreshed before anyone else.
+     */
+    @Query(value = """
+        SELECT c.* FROM creators c
+        WHERE c.deleted_at IS NULL
+          AND c.anonymised_at IS NULL
+          AND c.handle IS NOT NULL
+          AND (c.insights_refreshed_at IS NULL OR c.insights_refreshed_at < :staleBefore)
+          AND EXISTS (
+              SELECT 1 FROM campaign_cards card
+              JOIN campaigns campaign ON campaign.id = card.campaign_id
+              WHERE card.creator_id = c.id
+                AND card.deleted_at IS NULL
+                AND campaign.deleted_at IS NULL
+                AND campaign.status = 'ACTIVE')
+        ORDER BY c.insights_refreshed_at ASC NULLS FIRST
+        LIMIT :limit
+        """, nativeQuery = true)
+    List<Creator> findStaleOnActiveCampaigns(@Param("staleBefore") java.time.Instant staleBefore,
+                                             @Param("limit") int limit);
+
+    /**
+     * Requirement #26: the creators whose public figures are most out of date, never-refreshed
+     * first.
      */
     @Query("""
         SELECT c FROM Creator c

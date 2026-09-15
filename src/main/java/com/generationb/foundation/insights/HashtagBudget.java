@@ -69,9 +69,15 @@ public class HashtagBudget {
             return Optional.empty();
         }
 
-        // Already inside the window: free, and the id is already known.
+        // Serialises count-then-claim across concurrent sweeps and instances. Without it two
+        // sweeps can both see 27 of 30 used and both take the 28th slot. A table lock rather than
+        // an advisory one: it is released with the transaction and needs no key convention.
+        repository.lockForBudgetCheck();
+
+        Instant windowStart = windowStart();
         Optional<InstagramHashtagLookup> known = repository.findByHashtag(tag);
-        if (known.isPresent()) {
+        if (known.isPresent() && !known.get().getFirstUsedAt().isBefore(windowStart)) {
+            // Already inside the window: free, and the id is already known.
             InstagramHashtagLookup lookup = known.get();
             lookup.setLastUsedAt(Instant.now());
             lookup.setUseCount(lookup.getUseCount() + 1);
@@ -79,11 +85,26 @@ public class HashtagBudget {
             return Optional.of(lookup.getHashtagId());
         }
 
-        int used = repository.countUsedSince(windowStart());
+        int used = repository.countUsedSince(windowStart);
         if (used + 1 > limit - reserve) {
             log.warn("Instagram hashtag allowance: {} of {} unique tags used in the last 7 days. "
                     + "Refusing to add \"{}\" and keep {} in reserve.", used, limit, tag, reserve);
             return Optional.empty();
+        }
+
+        if (known.isPresent()) {
+            // Known from an earlier window. The node id is stable, so Meta need not be asked
+            // again, but using the tag now takes a fresh slot: the window restarts from today.
+            InstagramHashtagLookup lookup = known.get();
+            Instant now = Instant.now();
+            lookup.setFirstUsedAt(now);
+            lookup.setLastUsedAt(now);
+            lookup.setUseCount(1);
+            lookup.setFirstUsedByBrand(brandId);
+            repository.save(lookup);
+            log.info("Instagram hashtag \"{}\" re-entered the 7-day allowance ({} of {} now used)",
+                    tag, used + 1, limit);
+            return Optional.of(lookup.getHashtagId());
         }
 
         Optional<String> resolved = meta.hashtagId(tag);
@@ -99,7 +120,9 @@ public class HashtagBudget {
     @Transactional(readOnly = true)
     public boolean isAlreadyInWindow(String rawTag) {
         String tag = normalise(rawTag);
-        return tag != null && repository.findByHashtag(tag).isPresent();
+        return tag != null && repository.findByHashtag(tag)
+                .filter(lookup -> !lookup.getFirstUsedAt().isBefore(windowStart()))
+                .isPresent();
     }
 
     private static Instant windowStart() {

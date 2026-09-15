@@ -4,7 +4,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-// TODO(confirm): contrato Modash pendente de assinatura — ajustar mapeamento quando o contrato for assinado
+/**
+ * Where creator posts, mentions and audience figures come from.
+ *
+ * <p>Two implementations: the free platform APIs (Instagram Business Discovery, Hashtag Search and
+ * Insights for connected accounts; YouTube Data API) and a mock for development. See
+ * {@code InsightsProviderCondition} for which one is registered.
+ */
 public interface CreatorInsightsProvider {
 
     List<Map<String, Object>> searchCreators(String criteriaQuery, String platform, String niche);

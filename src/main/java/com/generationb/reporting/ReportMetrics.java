@@ -42,10 +42,6 @@ public record ReportMetrics(
     long longFormPosts,
     long unsolicitedPosts,
 
-    // --- quality ---
-    /** Distribution of the creators' quality bands, e.g. {"A": 3, "B": 1}. */
-    java.util.Map<String, Long> qualityBands,
-
     /** Null: conversion needs affiliate or UTM tracking that is not in place. */
     BigDecimal conversionRate,
 
@@ -79,7 +75,6 @@ public record ReportMetrics(
         long comments,
         BigDecimal engagementRate,
         Integer followerGrowth,
-        String qualityBand,
         /** Requirement #52: PENDING, CHASED, RECEIVED or WAIVED. */
         String insightStatus
     ) {}

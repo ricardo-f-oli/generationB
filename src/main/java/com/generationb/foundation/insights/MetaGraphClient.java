@@ -64,6 +64,14 @@ public class MetaGraphClient {
             "id,username,name,biography,website,followers_count,follows_count,media_count,"
                     + "profile_picture_url";
 
+    /**
+     * What an Instagram username may contain: letters, digits, dots and underscores, at most 30.
+     * Checked before a handle is written into a field expansion, because a handle such as
+     * {@code x){id}} would otherwise change which fields the request asks for.
+     */
+    private static final java.util.regex.Pattern VALID_HANDLE =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9._]{1,30}$");
+
     /** Post fields. Instagram gives like and comment counts; views only on some media types. */
     private static final String MEDIA_FIELDS =
             "id,caption,like_count,comments_count,media_type,media_product_type,media_url,"
@@ -83,7 +91,7 @@ public class MetaGraphClient {
      * field shapes between them; discovering that from a production error is worse than
      * discovering it from a calendar reminder.
      */
-    @Value("${insights.meta.api-version:v21.0}")
+    @Value("${insights.meta.api-version:v24.0}")
     private String apiVersion;
 
     /**
@@ -153,7 +161,7 @@ public class MetaGraphClient {
         if (cleaned == null || !isEnabled()) {
             return Optional.empty();
         }
-        String fields = "business_discovery.username(" + cleaned + "){username,followers_count,"
+        String fields = "business_discovery.username(" + cleaned + "){username,biography,followers_count,"
                 + "media.limit(" + Math.clamp(limit, 1, 100) + "){" + MEDIA_FIELDS + "}}";
 
         return get(igUserId, Map.of("fields", fields))
@@ -251,13 +259,13 @@ public class MetaGraphClient {
         }
         throttleNow();
 
-        Map<String, String> params = new LinkedHashMap<>(query);
-        params.put("access_token", token);
-
         try {
+            // The token goes in a header rather than the query string, so it never lands in a
+            // proxy log or an APM trace alongside the URL.
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/" + apiVersion + "/" + path + queryString(params)))
+                    .uri(URI.create(baseUrl + "/" + apiVersion + "/" + path + queryString(query)))
                     .header("Accept", "application/json")
+                    .header("Authorization", "Bearer " + token)
                     .timeout(Duration.ofSeconds(timeoutSeconds))
                     .GET()
                     .build();
@@ -281,7 +289,7 @@ public class MetaGraphClient {
             Thread.currentThread().interrupt();
             return Optional.empty();
         } catch (Exception e) {
-            // Class name only: the URL carries an access token and a creator handle.
+            // Class name only: the URL carries a creator handle.
             log.warn("Meta Graph {} failed: {}", path, e.getClass().getSimpleName());
             return Optional.empty();
         }
@@ -346,12 +354,19 @@ public class MetaGraphClient {
         return out.toString();
     }
 
-    private static String handleOf(String raw) {
+    /** The handle without its leading {@code @}, or null when it is not a valid username. */
+    static String handleOf(String raw) {
         if (raw == null) {
             return null;
         }
         String cleaned = raw.trim().replaceFirst("^@", "");
-        return cleaned.isBlank() ? null : cleaned;
+        if (!VALID_HANDLE.matcher(cleaned).matches()) {
+            if (!cleaned.isBlank()) {
+                log.info("Not looking up \"{}\" on Instagram: not a valid username", cleaned);
+            }
+            return null;
+        }
+        return cleaned;
     }
 
     private static String tagOf(String raw) {
