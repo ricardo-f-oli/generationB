@@ -7,12 +7,26 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
     hikari:
-      # Q-G7: Render free tier is a single small instance and Neon free tier caps
-      # connections, so the pool is deliberately small.
+      # Q-G7: Render free tier is a single small instance and the managed Postgres free tiers
+      # cap connections, so the pool is deliberately small.
       maximum-pool-size: ${DB_POOL_MAX:5}
-      minimum-idle: 1
+
+      # minimum-idle MUST stay 0 on a serverless Postgres, and this is not a tuning preference.
+      #
+      # It was 1, which means Hikari holds one connection open forever. A managed Postgres only
+      # scales its compute to zero when nothing is connected, so a permanently-held connection
+      # bills compute 24 hours a day whatever the traffic. That is how the Neon free tier's
+      # monthly compute allowance was exhausted with almost no users on the system, and the
+      # first symptom was the API failing to boot: "Your account or project has exceeded the
+      # quota", from Flyway, before the app ever started.
+      #
+      # The cost of 0 is a cold start on the first request after an idle spell, roughly a
+      # second. That is free here: the Render service it runs on already sleeps after 15
+      # minutes, so that request was paying a cold start regardless.
+      minimum-idle: 0
+      # Drain quickly so the database is left alone and can suspend.
+      idle-timeout: 60000
       connection-timeout: 20000
-      idle-timeout: 300000
       max-lifetime: 1200000
   jpa:
     hibernate:

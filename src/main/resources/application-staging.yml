@@ -7,7 +7,7 @@
 # quietly relaxed has tested nothing.
 #
 # What genuinely differs:
-#   * its own database (a Neon branch), so a bad migration costs nothing
+#   * its own database (a separate Supabase project), so a bad migration costs nothing
 #   * its own bucket, so a test upload is not in the production bucket forever
 #   * DEBUG logging, because staging is where you go to read logs
 #   * the retention sweeper is OFF by default — staging data is usually a copy of production

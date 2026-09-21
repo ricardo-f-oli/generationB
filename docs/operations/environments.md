@@ -7,7 +7,7 @@ Three, and what each one is for.
 | Spring profile | `local` | `staging` | `prod` |
 | Branch | any | `staging` | `main` |
 | API | `http://localhost:8080/api` | `generationb-api-staging.onrender.com` | `generationb-api.onrender.com` |
-| Database | Docker Postgres | Neon branch `staging` | Neon branch `main` |
+| Database | Docker Postgres | Supabase project `staging` | Supabase project `prod` |
 | Frontend | `npm run dev` | Vercel project `generation-bfe-staging` | Vercel project `generation-bfe` |
 | Creator data | mock | mock | Meta + YouTube |
 | Email | Mailpit (nothing leaves) | SendGrid sandbox | SendGrid, live |
@@ -35,18 +35,24 @@ git checkout -b staging && git push -u origin staging
 Both repos — `generationB` and `generationBFE`. From here, work merges into `staging`, gets
 looked at on the deployed staging site, and only then merges into `main`.
 
-### 2. Database — a Neon branch
+### 2. Database — a second Supabase project
 
-Neon's free tier includes branching, and a branch is copy-on-write: a full copy of production's
-schema and data for near-zero storage.
+Supabase has no branching on the free tier, so staging is a *separate project* rather than a
+branch. That is stricter isolation than the Neon branch this originally described, and it means
+a staging reset is a project reset.
 
-1. Neon console → project `generationb` → **Branches** → **New branch**.
-2. Parent `main` (or `production`), name it `staging`.
-3. Copy its connection string — note it has its **own host**, and that host is the only thing
-   distinguishing it from production. Getting this wrong points staging at live data.
+1. Supabase → **New project**, named `generationb-staging`.
+2. **Connect → Session pooler**, copy the URI.
 
-Reset it whenever staging data gets messy: delete the branch, create it again from `main`. That
-is the whole disaster-recovery story for staging, and it takes a minute.
+Two things that will cost you an afternoon if you skip them:
+
+- Use the **session pooler** host (`aws-1-<region>.pooler.supabase.com:5432`), never the direct
+  `db.<ref>.supabase.co`. The direct host is IPv6-only and Render's outbound is IPv4 — the app
+  dies at boot with `Network unreachable`.
+- Port **5432** (session mode), not 6543 (transaction mode). Transaction mode does not carry
+  prepared statements, which Hibernate needs, and Flyway's lock needs a real session.
+
+The username is `postgres.<project-ref>`.
 
 ### 3. Backend — a second Render service
 
@@ -56,7 +62,7 @@ every `sync: false` value.
 
 Fill each one **separately from production's**. The four that matter most:
 
-- `SPRING_DATASOURCE_*` — the Neon **staging branch** host. Not production's.
+- `SPRING_DATASOURCE_*` — the **staging project's** session-pooler URL. Not production's.
 - `JWT_SECRET` — generated per service, so a staging token is worthless against production.
 - `OUTREACH_FROM_ADDRESS` — a staging sender. Never `noreply@btheagency.com`.
 - `STORAGE_BUCKET` — `generationb-staging`. A separate R2 bucket.
@@ -131,8 +137,10 @@ appears at `/creators/registrations`. If that round trip works, staging is real.
 **Free Render services sleep.** After ~15 minutes idle, the first request takes 30–60s while the
 container wakes. Before a demo, hit the health endpoint once to warm it.
 
-**Two free services, one free Neon project.** Both fit the free tiers, but the Neon project has a
-shared compute quota across branches. Heavy staging use slows production.
+**Watch the compute quota, on any serverless Postgres.** This bit once already: Hikari was
+configured with `minimum-idle: 1`, which holds a connection open forever, which stops the
+database suspending, which bills compute 24/7 on a system with almost no users. The Neon free
+allowance ran out and the API stopped booting. `minimum-idle` is now `0` — do not raise it.
 
 **`npm run build` on the staging Vercel project points staging at production.** Worth repeating
 because it fails silently and looks like staging "working".

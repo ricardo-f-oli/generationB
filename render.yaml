@@ -1,8 +1,17 @@
 # Render blueprint. Create the service from this file, or configure the same
 # settings by hand in the Render dashboard.
 #
-# The database is Neon (free tier) rather than Render Postgres, because Render's
-# free Postgres expires after 30 days.
+# The database is Supabase (free tier). Render's own free Postgres expires after 30 days; Neon
+# was used before that and its free monthly compute allowance was exhausted, which took the API
+# down at startup (Flyway could not connect: "exceeded the quota"). See the minimum-idle note in
+# application.yml — a permanently-held connection was the reason it burned compute around the
+# clock, and that mistake is portable to any serverless Postgres, Supabase included.
+#
+# IMPORTANT: use the SESSION POOLER host, not the direct one.
+#   direct   db.<ref>.supabase.co:5432                  IPv6 only -> unreachable from Render
+#   pooler   aws-1-<region>.pooler.supabase.com:5432    IPv4, username is postgres.<ref>
+# Port 5432 on the pooler is session mode. Do NOT use 6543 (transaction mode): it does not carry
+# prepared statements, which Hibernate needs, and Flyway's migration lock needs a real session.
 #
 # `sync: false` means "Render prompts for this and stores it as a secret" — the
 # value is never in this file and never in git.
@@ -26,7 +35,7 @@ services:
 
       # ------------------------------------------------------- database
       - key: SPRING_DATASOURCE_URL
-        sync: false            # jdbc:postgresql://<neon-host>/<db>?sslmode=require
+        sync: false            # jdbc:postgresql://aws-1-<region>.pooler.supabase.com:5432/postgres?sslmode=require
       - key: SPRING_DATASOURCE_USERNAME
         sync: false
       - key: SPRING_DATASOURCE_PASSWORD
@@ -126,7 +135,7 @@ services:
 
 # ---------------------------------------------------------------------------
 # Staging: the same image, built from the same Dockerfile, on the `staging`
-# branch and its own Neon database branch.
+# branch and its own Supabase project.
 #
 # Every `sync: false` below is prompted for separately from the production
 # service's. That is the point — nothing is shared. Reusing the production
@@ -151,11 +160,12 @@ services:
         value: staging
 
       # --------------------------------------------------- database (separate)
-      # A Neon BRANCH of the production database, not production itself. Neon's
-      # free tier includes branching; a branch is copy-on-write, so this costs
-      # almost nothing and can be reset whenever staging data gets messy.
+      # A SEPARATE Supabase project from production. Supabase has no branching
+      # on the free tier, so this is a second project rather than a branch —
+      # which is stricter isolation, and resetting it means resetting that
+      # project rather than dropping a branch.
       - key: SPRING_DATASOURCE_URL
-        sync: false            # jdbc:postgresql://<neon-staging-branch-host>/<db>?sslmode=require
+        sync: false            # the STAGING project's session-pooler URL, not production's
       - key: SPRING_DATASOURCE_USERNAME
         sync: false
       - key: SPRING_DATASOURCE_PASSWORD

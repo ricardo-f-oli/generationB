@@ -67,10 +67,15 @@ every migration, which puts them back on `Password123!`.
 
 ## Production Free Deployment Guide
 
-### 1. Database: Neon (Free Managed PostgreSQL)
-1. Create a free account on [Neon.tech](https://neon.tech).
-2. Create a project named `generationb`.
-3. Copy the PostgreSQL connection string (`postgres://user:password@ep-xxx.neon.tech/generationb?sslmode=require`).
+### 1. Database: Supabase (Free Managed PostgreSQL)
+1. Create a free account on [Supabase.com](https://supabase.com) and a project.
+2. **Connect → Session pooler** and copy that URI. Do *not* use the direct
+   `db.<ref>.supabase.co` one: it resolves to IPv6 only, and Render's outbound is IPv4, so the
+   app fails to start with `Network unreachable`.
+3. Session pooler means port **5432**, not 6543. Transaction mode (6543) drops prepared
+   statements, which Hibernate needs, and Flyway's migration lock needs a real session.
+
+The username is `postgres.<project-ref>`, not plain `postgres`.
 
 ### 2. Backend: Render (Free Web Service)
 1. Create a free account on [Render.com](https://render.com).
@@ -78,9 +83,9 @@ every migration, which puts them back on `Password123!`.
 3. Select **Docker** environment.
 4. Set Environment Variables:
    - `SPRING_PROFILES_ACTIVE`: `prod`
-   - `SPRING_DATASOURCE_URL`: `jdbc:postgresql://<neon-host>:5432/generationb?sslmode=require`
-   - `SPRING_DATASOURCE_USERNAME`: `<neon-username>`
-   - `SPRING_DATASOURCE_PASSWORD`: `<neon-password>`
+   - `SPRING_DATASOURCE_URL`: `jdbc:postgresql://aws-1-<region>.pooler.supabase.com:5432/postgres?sslmode=require`
+   - `SPRING_DATASOURCE_USERNAME`: `postgres.<project-ref>`
+   - `SPRING_DATASOURCE_PASSWORD`: `<your-db-password>`
    - `JWT_SECRET`: `<generate-a-long-random-256bit-string>`
    - `RESEND_API_KEY`: `<your-resend-api-key>`
    - `FRONTEND_URL`: `https://generation-bfe.vercel.app`
