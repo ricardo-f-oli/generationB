@@ -48,6 +48,17 @@ public class User extends BaseEntity {
     @Column(name = "password_changed_at")
     private Instant passwordChangedAt;
 
+    /**
+     * The account is on a temporary password — seeded, or handed over by someone else. Every
+     * request except change-password, me and logout is refused until the user sets their own.
+     *
+     * <p>This is enforced server-side in {@link com.generationb.foundation.internal.PasswordChangeGate}
+     * rather than by the frontend alone: a flag the UI merely respects is bypassed by anyone
+     * who calls the API directly with the token the login just handed them.
+     */
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword = false;
+
     public boolean isLocked() {
         return lockedUntil != null && lockedUntil.isAfter(Instant.now());
     }

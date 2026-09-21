@@ -21,7 +21,10 @@ public final class PasswordPolicy {
             "password", "password1", "password123", "passw0rd", "letmein",
             "qwertyuiop", "123456789012", "1234567890", "iloveyou",
             "administrator", "generationb", "welcome123", "changeme123",
-            "abcdefghijkl", "qwerty123456"
+            "abcdefghijkl", "qwerty123456",
+            // The seeded handover password. Exactly 12 characters, so it satisfies the length
+            // rule and would otherwise be a legal choice for the password it is meant to replace.
+            "password123!"
     );
 
     private PasswordPolicy() {

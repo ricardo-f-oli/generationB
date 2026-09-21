@@ -95,8 +95,16 @@ public class AuthService {
         userRepository.save(user);
         loginAttemptRepository.save(LoginAttempt.of(identifier, ipAddress, true));
 
+        if (user.isMustChangePassword()) {
+            // Not a failure: the login succeeds and a token is issued. That token simply cannot
+            // do anything but change the password. Refusing the login outright would leave the
+            // account unreachable, which is the problem this replaced.
+            log.info("Login on a temporary password userId={}; change is required", user.getId());
+        }
+
         String accessToken = jwtUtil.generateAccessToken(
-                user.getEmail(), user.getBrandId(), user.getId(), user.getRole());
+                user.getEmail(), user.getBrandId(), user.getId(), user.getRole(),
+                user.isMustChangePassword());
         String rawRefreshToken = issueRefreshToken(user);
 
         return new AuthResult(accessToken, rawRefreshToken, toUserMap(user));
@@ -148,7 +156,8 @@ public class AuthService {
         refreshTokenRepository.save(stored);
 
         String accessToken = jwtUtil.generateAccessToken(
-                user.getEmail(), user.getBrandId(), user.getId(), user.getRole());
+                user.getEmail(), user.getBrandId(), user.getId(), user.getRole(),
+                user.isMustChangePassword());
         String newRefreshToken = issueRefreshToken(user);
 
         return new AuthResult(accessToken, newRefreshToken, toUserMap(user));
@@ -241,6 +250,61 @@ public class AuthService {
         refreshTokenRepository.revokeAllForUser(user.getId(), Instant.now());
     }
 
+    // ----------------------------------------------------- change password
+
+    /**
+     * Sets a new password for a signed-in user, and clears the temporary-password flag.
+     *
+     * <p>The current password is required even though the caller already holds a valid token:
+     * it is what stops an unattended logged-in browser from being used to lock the real owner
+     * out of the account.
+     *
+     * <p>New tokens are returned rather than forcing a fresh login. Every previously issued
+     * token is revoked first, so the pair handed back is the only one that still works — the
+     * user keeps their session, and a stolen token does not.
+     */
+    @Transactional
+    public AuthResult changePassword(UUID userId, String currentPassword, String newPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> ApiException.unauthorized("Session is no longer valid"));
+
+        if (currentPassword == null || currentPassword.isEmpty()) {
+            throw ApiException.badRequest("Your current password is required");
+        }
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            // Deliberately not counted towards lockout: this caller is already authenticated,
+            // so a wrong entry here is a typo, not an attack on the account.
+            throw ApiException.badRequest("That is not your current password");
+        }
+
+        PasswordPolicy.validate(newPassword);
+
+        // Without this, "change your password" is satisfied by typing the same one back, and a
+        // seeded account stays on Password123! with the flag cleared.
+        if (passwordEncoder.matches(newPassword, user.getPassword())) {
+            throw ApiException.badRequest("Your new password must be different from the current one");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPasswordChangedAt(Instant.now());
+        user.setMustChangePassword(false);
+        user.setFailedLoginCount(0);
+        user.setLockedUntil(null);
+        userRepository.save(user);
+
+        // Same rule as a reset: changing a password ends every other session.
+        passwordResetTokenRepository.invalidateAllForUser(user.getId(), Instant.now());
+        refreshTokenRepository.revokeAllForUser(user.getId(), Instant.now());
+
+        log.info("Password changed for userId={}", user.getId());
+
+        String accessToken = jwtUtil.generateAccessToken(
+                user.getEmail(), user.getBrandId(), user.getId(), user.getRole(), false);
+        String rawRefreshToken = issueRefreshToken(user);
+
+        return new AuthResult(accessToken, rawRefreshToken, toUserMap(user));
+    }
+
     // ------------------------------------------------------------------ me
 
     @Transactional(readOnly = true)
@@ -257,6 +321,7 @@ public class AuthService {
         map.put("name", user.getName() != null ? user.getName() : user.getEmail());
         map.put("role", user.getRole());
         map.put("brandId", user.getBrandId());
+        map.put("mustChangePassword", user.isMustChangePassword());
         return map;
     }
 

@@ -52,12 +52,20 @@ public class JwtUtil {
         this.accessTokenExpirationMs = accessTokenMinutes * 60 * 1000;
     }
 
-    public String generateAccessToken(String email, UUID brandId, UUID userId, String role) {
+    /**
+     * @param mustChangePassword carried as a claim so the per-request check costs no database
+     *                           read. It is only ever set by a fresh login or refresh, both of
+     *                           which read the user row, and changing a password revokes every
+     *                           outstanding token — so a stale `true` cannot outlive the change.
+     */
+    public String generateAccessToken(String email, UUID brandId, UUID userId, String role,
+                                      boolean mustChangePassword) {
         return Jwts.builder()
                 .subject(email)
                 .claim("brand_id", brandId.toString())
                 .claim("user_id", userId.toString())
                 .claim("role", role)
+                .claim("must_change_password", mustChangePassword)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + accessTokenExpirationMs))
                 .signWith(key)

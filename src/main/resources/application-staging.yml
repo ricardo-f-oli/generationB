@@ -1,0 +1,69 @@
+# Staging. A production-shaped environment you are allowed to break.
+#
+# The rule this profile exists to enforce: staging differs from prod in the *blast radius* of a
+# mistake, never in the code path taken. So every hardening control that prod turns on is on
+# here too — JWT_SECRET is still required, CORS still has to be declared, cookies are still
+# secure, storage is still the object store. A staging run that passes because a guard was
+# quietly relaxed has tested nothing.
+#
+# What genuinely differs:
+#   * its own database (a Neon branch), so a bad migration costs nothing
+#   * its own bucket, so a test upload is not in the production bucket forever
+#   * DEBUG logging, because staging is where you go to read logs
+#   * the retention sweeper is OFF by default — staging data is usually a copy of production
+#     data, and a real sweep would delete rows that still exist in the live system
+#   * scheduled jobs are off unless you deliberately turn one on, so two environments are not
+#     both calling Meta against the same rate limit at 06:00
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  jpa:
+    hibernate:
+      # Same as prod. Flyway owns the schema; a staging run that let Hibernate patch the schema
+      # would go green on a migration that fails in production.
+      ddl-auto: validate
+    open-in-view: false
+
+# No default, exactly as in prod: the app refuses to start without it (Q-B5).
+jwt:
+  secret: ${JWT_SECRET}
+
+app:
+  frontend-url: ${FRONTEND_URL}
+  cookie-secure: true
+
+# No default either. Staging must declare its own origins (Q-B14) — it does NOT inherit prod's.
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS}
+
+storage:
+  provider: ${STORAGE_PROVIDER:s3}
+  # Point this at a separate bucket. Sharing prod's bucket means a staging test leaves objects
+  # in it that nothing will ever clean up.
+  bucket: ${STORAGE_BUCKET:generationb-staging}
+
+logging:
+  level:
+    root: INFO
+    com.generationb: ${LOG_LEVEL:DEBUG}
+
+# Client handover: empty this environment of the sample dataset.
+#
+# Opt-in, and scoped to staging on purpose — see db/handover/V900__remove_demo_data.sql. Drop
+# this override (or set FLYWAY_LOCATIONS back to classpath:db/migration) if you ever want a
+# staging database that keeps the demo data for your own testing.
+spring.flyway:
+  locations: ${FLYWAY_LOCATIONS:classpath:db/migration,classpath:db/handover}
+
+# Off by default. Turn it on only on a database you are willing to lose rows from.
+retention:
+  enabled: ${RETENTION_ENABLED:false}
+
+# The daily insights refresh shares Meta's per-app rate limit with production. Two environments
+# racing for the same 30-hashtag weekly budget is how prod quietly stops discovering mentions.
+# 1 Jan at 05:00 — effectively never, and still overridable for a deliberate test run.
+insights:
+  enrichment:
+    cron: ${INSIGHTS_REFRESH_CRON:0 0 5 1 1 *}

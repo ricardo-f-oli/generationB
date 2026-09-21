@@ -29,16 +29,27 @@ Services will start:
 
 ---
 
-## Local Test Accounts (Dev Seed Data)
+## Seeded Accounts
 
-All test accounts are seeded automatically via Flyway migration `V15__seed_dev_users.sql` with default password: `Password123!`
+Four accounts are seeded by `V15__seed_dev_users.sql`, and V44 puts every one of them on a
+**single-use password**: `Password123!` works once, and the session it opens can do nothing
+except set a real password. Every other endpoint answers `403 PASSWORD_CHANGE_REQUIRED` until
+it is changed.
 
-| Role | Email | Username | Password |
-|---|---|---|---|
-| **ADMIN** | `admin@generationb.dev` | `admin` | `Password123!` |
-| **DIRECTOR** | `director@generationb.dev` | `director` | `Password123!` |
-| **ACCOUNT_MANAGER** | `am@generationb.dev` | `am` | `Password123!` |
-| **ACCOUNT_EXECUTIVE** | `ae@generationb.dev` | `ae` | `Password123!` |
+| Role | Email | Username |
+|---|---|---|
+| **ADMIN** | `admin@generationb.dev` | `admin` |
+| **DIRECTOR** | `director@generationb.dev` | `director` |
+| **ACCOUNT_MANAGER** | `am@generationb.dev` | `am` |
+| **ACCOUNT_EXECUTIVE** | `ae@generationb.dev` | `ae` |
+
+This is enforced in `PasswordChangeGate`, not in the frontend. A flag the UI merely respects is
+bypassed by anyone who calls the API directly with the token the login just handed them, and
+this password is printed in a file in the repository.
+
+Local development note: after changing these passwords locally you will not get them back by
+restarting — V44 has already run. `docker compose down -v` resets the database and replays
+every migration, which puts them back on `Password123!`.
 
 ---
 
@@ -49,6 +60,7 @@ All test accounts are seeded automatically via Flyway migration `V15__seed_dev_u
 - `POST /api/auth/logout` — accepts `{ "refreshToken": "..." }`
 - `POST /api/auth/forgot-password` — accepts `{ "email": "admin@generationb.dev" }`
 - `POST /api/auth/reset-password` — accepts `{ "token": "...", "newPassword": "..." }`
+- `POST /api/auth/change-password` — accepts `{ "currentPassword": "...", "newPassword": "..." }`, returns a fresh token pair
 - `GET /api/auth/me` — returns authenticated user data
 
 ---
@@ -79,5 +91,8 @@ All test accounts are seeded automatically via Flyway migration `V15__seed_dev_u
 2. Generate an API Key and set it in Render as `RESEND_API_KEY`.
 
 ### 4. Frontend: Vercel
-1. Set `VITE_USE_MOCK_DATA=false` in Vercel project environment variables.
-2. Set `VITE_API_BASE_URL=https://<your-render-app>.onrender.com/api`.
+`VITE_API_BASE_URL` is baked in at build time from `.env.production`, so there is nothing to set
+in Vercel for a production deploy. Staging is a separate project built with
+`npm run build:staging`, which reads `.env.staging` instead.
+
+See `docs/operations/environments.md` for the full local / staging / production breakdown.

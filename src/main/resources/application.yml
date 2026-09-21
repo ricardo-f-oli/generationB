@@ -32,6 +32,16 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
+    # `db/handover` is deliberately NOT here. It holds the one-off script that empties an
+    # environment of sample data for a client handover, and in production that script is a
+    # data-loss event — DELETE FROM creators cannot tell a seeded creator from a real one.
+    # An environment that should be empty opts in explicitly:
+    #   FLYWAY_LOCATIONS=classpath:db/migration,classpath:db/handover
+    locations: ${FLYWAY_LOCATIONS:classpath:db/migration}
+    # Once handover has run somewhere, that environment has a history row for a script the
+    # default location set does not resolve. Without this, the next boot fails validation on a
+    # migration that did exactly what it was asked to.
+    ignore-migration-patterns: "*:missing"
   jackson:
     default-property-inclusion: non_null
     serialization:

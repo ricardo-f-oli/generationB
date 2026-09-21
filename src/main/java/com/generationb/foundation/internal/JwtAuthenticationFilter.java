@@ -27,6 +27,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
+    /**
+     * Where the temporary-password flag is left for {@link PasswordChangeGate}. A request
+     * attribute rather than a field: filters are singletons and requests are concurrent.
+     */
+    static final String MUST_CHANGE_PASSWORD_ATTRIBUTE = "genb.mustChangePassword";
+
     private final JwtUtil jwtUtil;
 
     public JwtAuthenticationFilter(JwtUtil jwtUtil) {
@@ -79,6 +85,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             UUID brandId = UUID.fromString(brandIdStr);
             UUID userId = userIdStr != null ? UUID.fromString(userIdStr) : null;
+
+            // Absent on tokens minted before the claim existed, which reads as false — correct:
+            // those belong to accounts that were never flagged.
+            if (Boolean.TRUE.equals(claims.get("must_change_password", Boolean.class))) {
+                request.setAttribute(MUST_CHANGE_PASSWORD_ATTRIBUTE, Boolean.TRUE);
+            }
 
             BrandContext.set(brandId, userId, role.name());
             MDC.put("brandId", brandId.toString());

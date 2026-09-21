@@ -34,14 +34,18 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final PasswordChangeGate passwordChangeGate;
     private final ObjectMapper objectMapper;
 
     /** Q-B14: no production origin as a code default; prod must set CORS_ALLOWED_ORIGINS. */
     @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000}")
     private String allowedOrigins;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter, ObjectMapper objectMapper) {
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
+                          PasswordChangeGate passwordChangeGate,
+                          ObjectMapper objectMapper) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.passwordChangeGate = passwordChangeGate;
         this.objectMapper = objectMapper;
     }
 
@@ -94,7 +98,10 @@ public class SecurityConfig {
                     writeError(response, HttpStatus.FORBIDDEN, "ACCESS_DENIED",
                             "You do not have permission to perform this action", request.getRequestURI()))
             )
-            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            // After the JWT filter, so the flag it resolves is on the request by the time this
+            // runs. Before the controllers, so a flagged account cannot reach one.
+            .addFilterAfter(passwordChangeGate, JwtAuthenticationFilter.class);
 
         return http.build();
     }

@@ -64,6 +64,11 @@ public class AuthController {
             @NotBlank(message = "New password is required") String newPassword) {
     }
 
+    public record ChangePasswordRequest(
+            @NotBlank(message = "Your current password is required") String currentPassword,
+            @NotBlank(message = "New password is required") String newPassword) {
+    }
+
     @PostMapping("/login")
     public ApiResponse<Map<String, Object>> login(@Valid @RequestBody LoginRequest request,
                                                   HttpServletRequest httpRequest,
@@ -112,6 +117,28 @@ public class AuthController {
     public ApiResponse<Map<String, String>> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         authService.resetPassword(request.token(), request.newPassword());
         return ApiResponse.of(Map.of("message", "Password updated successfully"));
+    }
+
+    /**
+     * Sets a new password for the signed-in user.
+     *
+     * <p>Reachable while {@code must_change_password} is set — it is one of the few paths
+     * {@link PasswordChangeGate} lets through, and the only one that clears the flag.
+     *
+     * <p>Returns a fresh token pair, because the change revokes every token issued before it.
+     * Without that the caller would be logged out by its own success.
+     */
+    @PostMapping("/change-password")
+    public ApiResponse<Map<String, Object>> changePassword(@Valid @RequestBody ChangePasswordRequest request,
+                                                           HttpServletResponse httpResponse) {
+        UUID currentUserId = BrandContext.getCurrentUserId();
+        if (currentUserId == null) {
+            throw ApiException.unauthorized("Authentication required");
+        }
+        AuthService.AuthResult result = authService.changePassword(
+                currentUserId, request.currentPassword(), request.newPassword());
+        writeRefreshCookie(httpResponse, result.refreshToken());
+        return ApiResponse.of(payload(result));
     }
 
     @GetMapping("/me")

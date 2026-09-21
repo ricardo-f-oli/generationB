@@ -96,9 +96,29 @@ public abstract class IntegrationTest {
     @Autowired
     protected TestAuth auth;
 
+    @Autowired
+    protected org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     @BeforeEach
     void resetBrandContext() {
         com.generationb.foundation.BrandContext.clear();
+    }
+
+    /**
+     * V44 puts the seeded accounts on a single-use password, and PasswordChangeGate then refuses
+     * every endpoint until it is changed. {@link TestAuth} signs in as those accounts, so without
+     * this the entire integration suite would 403 — every test failing for a reason none of them
+     * is about.
+     *
+     * <p>Cleared before each test rather than once, because a test that exercises the gate
+     * deliberately sets the flag back and must not leave it set for whatever runs next.
+     *
+     * <p>The gate itself is covered by {@code ForcedPasswordChangeIntegrationTest}, which turns
+     * the flag on for one account on purpose.
+     */
+    @BeforeEach
+    void clearTemporaryPasswordFlag() {
+        jdbcTemplate.update("UPDATE users SET must_change_password = false");
     }
 
     /** A small file on disk, for upload tests. */
