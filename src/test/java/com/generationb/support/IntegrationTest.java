@@ -10,8 +10,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.testcontainers.containers.MinIOContainer;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
@@ -25,7 +26,7 @@ import java.nio.file.Path;
  * — JSONB type binding, parameter type inference on a null timestamp, partial unique indexes —
  * and every one of them would have passed against H2.
  *
- * <p>MinIO gives the storage adapter a real S3 API to talk to. A mocked S3 client tests that we
+ * <p>S3Mock gives the storage adapter a real S3 API to talk to. A mocked S3 client tests that we
  * called a method, not that the bucket layout, content types and presigned URLs are right.
  *
  * <p>Both containers are static, so all subclasses share one instance rather than paying the
@@ -57,28 +58,34 @@ public abstract class IntegrationTest {
                     .withDatabaseName("generationb")
                     .withReuse(true);
 
-    // Pulled from quay.io: MinIO removed its images from Docker Hub, so `minio/minio` no longer
-    // resolves there and every integration test failed at container start.
-    static final MinIOContainer MINIO =
-            new MinIOContainer(DockerImageName.parse("quay.io/minio/minio:RELEASE.2024-06-13T22-53-53Z")
-                    .asCompatibleSubstituteFor("minio/minio"))
-                    .withUserName("testaccess")
-                    .withPassword("testsecret123")
+    // S3Mock rather than MinIO: MinIO stopped publishing public images — Docker Hub dropped the
+    // tags and quay.io/minio/minio now answers 401 — so every integration test failed at
+    // container start. Pinned to an exact version so a new release cannot break CI unannounced.
+    private static final int S3_PORT = 9090;
+    private static final String S3_BUCKET = "generationb-test";
+
+    static final GenericContainer<?> S3 =
+            new GenericContainer<>(DockerImageName.parse("adobe/s3mock:5.2.3"))
+                    .withExposedPorts(S3_PORT)
+                    .withEnv("COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS", S3_BUCKET)
+                    .waitingFor(Wait.forListeningPort())
                     .withReuse(true);
 
     static {
         // Started manually rather than via @Container so both come up once for the whole suite.
         POSTGRES.start();
-        MINIO.start();
+        S3.start();
     }
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("storage.provider", () -> "s3");
-        registry.add("storage.endpoint", MINIO::getS3URL);
-        registry.add("storage.bucket", () -> "generationb-test");
-        registry.add("storage.access-key", MINIO::getUserName);
-        registry.add("storage.secret-key", MINIO::getPassword);
+        registry.add("storage.endpoint",
+                () -> "http://" + S3.getHost() + ":" + S3.getMappedPort(S3_PORT));
+        registry.add("storage.bucket", () -> S3_BUCKET);
+        // S3Mock accepts any credentials, but S3FileStorage refuses to start without them.
+        registry.add("storage.access-key", () -> "testaccess");
+        registry.add("storage.secret-key", () -> "testsecret123");
         registry.add("storage.region", () -> "us-east-1");
 
         // Deterministic secret so tokens are stable across runs.

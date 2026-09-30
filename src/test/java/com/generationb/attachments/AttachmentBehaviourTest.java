@@ -16,7 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Requirement #5, described as behaviour rather than as method calls.
  *
- * <p>Runs against a real PostgreSQL and a real S3 API (MinIO), through the full HTTP stack
+ * <p>Runs against a real PostgreSQL and a real S3 API (S3Mock), through the full HTTP stack
  * including the JWT filter — so what is asserted here is what a browser would actually get.
  */
 @DisplayName("Attaching files to a campaign card")
@@ -55,7 +55,7 @@ class AttachmentBehaviourTest extends IntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[?(@.id=='" + id + "')]").exists());
 
-        // MinIO can sign, so the download redirects rather than streaming.
+        // The S3 store can sign, so the download redirects rather than streaming.
         mockMvc.perform(get("/api/attachments/{id}/download", id)
                         .header("Authorization", token))
                 .andExpect(status().isFound())

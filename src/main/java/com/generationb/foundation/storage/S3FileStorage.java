@@ -29,7 +29,7 @@ import java.util.UUID;
  * <p>R2 was chosen over S3 for the free tier and, more importantly, no egress fees — this stores
  * campaign video, and S3 would bill for every download.
  *
- * <p>The same class also drives MinIO in tests and any other S3-compatible store, which is the
+ * <p>The same class also drives S3Mock in tests and any other S3-compatible store, which is the
  * point: {@code storage.endpoint} is the only thing that changes.
  */
 @Slf4j
@@ -65,7 +65,7 @@ public class S3FileStorage implements FileStoragePort {
         StaticCredentialsProvider credentials = StaticCredentialsProvider.create(
                 AwsBasicCredentials.create(accessKey, secretKey));
 
-        // Path-style access: R2 and MinIO both expect bucket-in-path, not bucket-as-subdomain.
+        // Path-style access: R2 and S3Mock both expect bucket-in-path, not bucket-as-subdomain.
         S3Configuration config = S3Configuration.builder().pathStyleAccessEnabled(true).build();
 
         this.client = S3Client.builder()
@@ -180,7 +180,7 @@ public class S3FileStorage implements FileStoragePort {
         try {
             client.headBucket(HeadBucketRequest.builder().bucket(bucket).build());
         } catch (S3Exception e) {
-            // Covers NoSuchBucket and the 404 that MinIO returns for a missing bucket.
+            // Covers NoSuchBucket and the bare 404 some S3-compatible stores return for a missing bucket.
             try {
                 client.createBucket(CreateBucketRequest.builder().bucket(bucket).build());
                 log.info("Created storage bucket '{}'", bucket);

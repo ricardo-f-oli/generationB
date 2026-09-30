@@ -186,17 +186,6 @@
             <scope>test</scope>
         </dependency>
 
-        <!--
-            MinIO speaks the S3 API too, so the storage adapter is tested against a real
-            object store rather than a mock. A mocked S3 client would have passed while the
-            bucket layout, content types and presigned URLs were all wrong.
-        -->
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>minio</artifactId>
-            <version>${testcontainers.version}</version>
-            <scope>test</scope>
-        </dependency>
 
         <!-- Readable assertions in the behaviour tests. -->
         <dependency>
