@@ -183,7 +183,7 @@ outreach:
   sendgrid:
     api-key: ${OUTREACH_SENDGRID_API_KEY:}
     from-address: ${OUTREACH_FROM_ADDRESS:noreply@btheagency.com}
-    from-name: ${OUTREACH_FROM_NAME:B. The Agency}
+    from-name: ${OUTREACH_FROM_NAME:b. the agency}
     reply-domain: ${OUTREACH_REPLY_DOMAIN:reply.btheagency.com}
 
     # Requirement #30. The event webhook is permitAll — SendGrid cannot log in — so the

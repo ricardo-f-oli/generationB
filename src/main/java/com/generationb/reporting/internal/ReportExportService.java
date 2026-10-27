@@ -59,7 +59,7 @@ public class ReportExportService {
         if (metrics == null) {
             throw ApiException.conflict("This report has no generated figures yet.");
         }
-        String brandName = brandLookup.findBrandName(report.getBrandId()).orElse("Generation B");
+        String brandName = brandLookup.findBrandName(report.getBrandId()).orElse("generation b.");
         String base = slug(report.getName());
 
         return switch (format == null ? "" : format.toLowerCase()) {

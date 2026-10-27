@@ -254,7 +254,7 @@ public class BriefService {
         // Requirements #2 and #3: a designed document, with the clauses attached to this brief
         // printed as its terms. Layout lives in the renderer; this method only gathers.
         String brandName = brandLookup.findBrandName(BrandContext.requireBrandId())
-                .orElse("Generation B");
+                .orElse("generation b.");
         return pdfRenderer.render(brief, brandName, listBriefClauses(briefId));
     }
 

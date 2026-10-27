@@ -48,7 +48,7 @@ public class WaitlistController {
         return ApiResponse.of(Map.of(
                 "id", view.id(),
                 "status", view.status(),
-                "message", "You are on the list. We will be in touch when Generation B opens up."));
+                "message", "You are on the list. We will be in touch when generation b. opens up."));
     }
 
     @GetMapping("/api/public/waitlist/confirm")

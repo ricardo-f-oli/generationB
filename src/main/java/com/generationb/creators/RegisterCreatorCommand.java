@@ -34,27 +34,25 @@ public record RegisterCreatorCommand(
 
     // ---------------------------------------------------- requirement #20
     //
-    // Five questions rather than one box. A single tick covering storage, marketing, address
-    // sharing and content reuse is not specific consent to any of them under UK GDPR, and it is
-    // worthless as evidence if a creator later says they never agreed to a brand seeing their
-    // rates. Only the first is required, because without it there is nothing to store.
+    // Two questions. The client asked for fewer tickboxes (27 Oct 2026), so the first now covers
+    // everything joining actually means — being kept on file, shown to brands and emailed about
+    // campaigns — and says so in one sentence. Content reuse stays a separate, optional choice
+    // because it is not something registering implies. Gifting addresses are no longer asked
+    // for here: the address form asks for that consent itself, when there is a parcel to send.
 
-    /** 1. "Keep my details on file so you can consider me for campaigns." */
+    /** 1. Required: keep my details, share my profile with brands, email me about campaigns. */
     @AssertTrue(message = "We need your permission to keep your details on file")
     boolean consentGiven,
 
-    /** 2. "Email me about paid campaigns and collaborations." */
-    boolean consentMarketingEmail,
-
-    /** 3. "Send me products to try, sharing my address with the fulfilment partner." */
-    boolean consentGiftingAddress,
-
-    /** 4. "Share my profile and rates with the client brands you work with." */
-    boolean consentBrandSharing,
-
-    /** 5. "Use my posted content in campaign reports and your own marketing." */
+    /** 2. Optional: use my published posts in generation b.'s own marketing. */
     boolean consentContentReuse
 ) {
+
+    /**
+     * Bumped whenever the wording below changes, and stored on every consent record, so the
+     * exact sentence a creator agreed to can always be reproduced. v1 was the five-question form.
+     */
+    public static final String POLICY_VERSION = "v2";
 
     /**
      * The questions, as the public form shows them. Kept beside the fields so the wording, the
@@ -66,17 +64,10 @@ public record RegisterCreatorCommand(
     public static List<Question> questions() {
         return List.of(
             new Question("consentGiven",
-                "Keep my details on file so Generation B can consider me for campaigns.", true),
-            new Question("consentMarketingEmail",
-                "Email me about paid campaigns and collaborations that suit my content.", false),
-            new Question("consentGiftingAddress",
-                "Send me products to try. I understand my address is shared with the "
-                    + "fulfilment partner who posts the parcel.", false),
-            new Question("consentBrandSharing",
-                "Share my profile, audience figures and rates with the client brands "
-                    + "Generation B works with.", false),
+                "Keep my details on file, share my profile with the brands b. the agency works "
+                    + "with, and email me about campaigns that suit my content.", true),
             new Question("consentContentReuse",
-                "Use posts I have published in campaign reports and in Generation B's own "
+                "Use posts I have published in campaign reports and in generation b.'s own "
                     + "marketing.", false)
         );
     }

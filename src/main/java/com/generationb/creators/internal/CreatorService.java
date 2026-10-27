@@ -210,11 +210,12 @@ public class CreatorService {
         creator.setOptInStatus("PENDING_REVIEW");
         creator.setOptInStep(5);
 
-        // Requirement #20: each answer stored as given. The previous code recorded consent for
-        // storage and marketing whatever the creator actually ticked.
-        creator.setConsentMarketingEmail(command.consentMarketingEmail());
-        creator.setConsentGiftingAddress(command.consentGiftingAddress());
-        creator.setConsentBrandSharing(command.consentBrandSharing());
+        // Requirement #20: each answer stored as given. The required question covers marketing
+        // email and brand sharing in its own wording, so both follow it; gifting is left false
+        // until the creator agrees on the address form.
+        creator.setConsentMarketingEmail(command.consentGiven());
+        creator.setConsentGiftingAddress(false);
+        creator.setConsentBrandSharing(command.consentGiven());
         creator.setConsentContentReuse(command.consentContentReuse());
         if (command.er() != null && !command.er().isBlank()) {
             try {

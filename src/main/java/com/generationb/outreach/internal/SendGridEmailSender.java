@@ -39,7 +39,7 @@ public class SendGridEmailSender {
     @Value("${outreach.sendgrid.from-address:noreply@btheagency.com}")
     private String defaultFromAddress;
 
-    @Value("${outreach.sendgrid.from-name:B. The Agency}")
+    @Value("${outreach.sendgrid.from-name:b. the agency}")
     private String defaultFromName;
 
     @Value("${outreach.sendgrid.reply-domain:reply.btheagency.com}")

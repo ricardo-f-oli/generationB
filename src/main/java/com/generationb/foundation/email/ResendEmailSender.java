@@ -32,7 +32,7 @@ public class ResendEmailSender implements EmailSender {
     @Value("${app.frontend-url:https://generation-bfe.vercel.app}")
     private String frontendUrl;
 
-    @Value("${resend.from-address:Generation B <onboarding@resend.dev>}")
+    @Value("${resend.from-address:\"generation b.\" <onboarding@resend.dev>}")
     private String fromAddress;
 
     @Value("${resend.director-address:}")
@@ -48,7 +48,7 @@ public class ResendEmailSender implements EmailSender {
     @Override
     public void sendPasswordResetEmail(String recipientEmail, String resetToken) {
         String url = frontendUrl + "/reset-password?token=" + resetToken;
-        send(recipientEmail, "Reset your Generation B password",
+        send(recipientEmail, "Reset your generation b. password",
                 "<p>Click <a href=\"" + url + "\">here</a> to reset your password. "
                         + "The link expires in 30 minutes.</p>");
     }

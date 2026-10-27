@@ -57,10 +57,12 @@ public class PublicCreatorController {
         // answered. This block used to grant DATA_STORAGE and MARKETING_EMAIL unconditionally,
         // so the audit trail said every creator had opted into marketing whether they had or
         // not — evidence that asserts something untrue is worse than no evidence.
+        // The required question names storage, brand sharing and campaign email in one sentence,
+        // so one tick is recorded against all three. Gifting is not asked here any more — the
+        // address form records that consent when an address is actually given.
         recordConsent(creator, ConsentRecord.DATA_STORAGE, command.consentGiven(), ip);
-        recordConsent(creator, ConsentRecord.MARKETING_EMAIL, command.consentMarketingEmail(), ip);
-        recordConsent(creator, ConsentRecord.GIFTING_ADDRESS, command.consentGiftingAddress(), ip);
-        recordConsent(creator, ConsentRecord.BRAND_SHARING, command.consentBrandSharing(), ip);
+        recordConsent(creator, ConsentRecord.MARKETING_EMAIL, command.consentGiven(), ip);
+        recordConsent(creator, ConsentRecord.BRAND_SHARING, command.consentGiven(), ip);
         recordConsent(creator, ConsentRecord.CONTENT_REUSE, command.consentContentReuse(), ip);
 
         return ApiResponse.of(Map.of(
@@ -81,6 +83,7 @@ public class PublicCreatorController {
                 creator.getId(), creator.getEmail(), consentType,
                 ConsentRecord.CONSENT, "SELF_REGISTRATION", ip);
         record.setGranted(granted);
+        record.setPolicyVersion(RegisterCreatorCommand.POLICY_VERSION);
         consentRepository.save(record);
     }
 

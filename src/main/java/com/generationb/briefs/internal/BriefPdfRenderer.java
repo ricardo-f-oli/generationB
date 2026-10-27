@@ -74,7 +74,7 @@ public class BriefPdfRenderer {
         try {
             PdfWriter.getInstance(document, out);
             document.addTitle(brief.getCampaignName() + " — campaign brief");
-            document.addCreator("Generation B");
+            document.addCreator("generation b.");
             document.open();
 
             masthead(document, brief, brand);
@@ -204,7 +204,7 @@ public class BriefPdfRenderer {
         doc.add(spacer(16));
         doc.add(thinRule());
         Paragraph footer = new Paragraph(
-                "Prepared by Generation B  ·  "
+                "Prepared by generation b.  ·  "
                         + DATE.format(brief.getCreatedAt() == null
                                 ? Instant.now() : brief.getCreatedAt())
                         + "  ·  This brief is confidential.", FOOTNOTE);

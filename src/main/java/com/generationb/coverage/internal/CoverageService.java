@@ -488,7 +488,7 @@ public class CoverageService {
             return false;
         }
 
-        String brandName = brandLookup.findBrandName(settings.getBrandId()).orElse("Generation B");
+        String brandName = brandLookup.findBrandName(settings.getBrandId()).orElse("generation b.");
         String subject = items.size() + " new piece" + (items.size() == 1 ? "" : "s")
                 + " of coverage for " + brandName;
 
