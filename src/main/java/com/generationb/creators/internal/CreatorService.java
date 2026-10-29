@@ -43,6 +43,7 @@ public class CreatorService {
     private final GlobalSuppressionRepository suppressionRepository;
     private final ContentStyleTagRepository tagRepository;
     private final CreatorStyleTagLinkRepository tagLinkRepository;
+    private final CreatorAudienceReportRepository audienceReportRepository;
 
     // ------------------------------------------------------------- queries
 
@@ -399,6 +400,8 @@ public class CreatorService {
         creator.setOptInStatus("REJECTED");
         creator.setDeletedAt(Instant.now());
         creatorRepository.save(creator);
+        // Bought audience reports describe this creator's following; they go with the rest.
+        audienceReportRepository.deleteByCreatorId(creatorId);
 
         // Keep them off every future list.
         suppress(priorEmail, null, creatorId, "Right to erasure exercised", "ERASURE");

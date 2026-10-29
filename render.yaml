@@ -49,11 +49,20 @@ services:
       - key: FRONTEND_URL
         sync: false            # https://<your-app>.vercel.app
 
+      # ------------------------------ creator data, CreatorDB (#10, 23, 26)
+      #
+      # The paid vendor: discovery, posts and audience demographics on
+      # Instagram, TikTok and YouTube. Setting the key selects it; the free
+      # platform credentials below then act as its fallback. See
+      # docs/integrations/creatordb.md.
+      - key: CREATORDB_API_KEY
+        sync: false
+
       # ---------------------- creator data, free platform APIs (#10, 11, 26)
       #
-      # No paid vendor. Setting either credential selects the platform APIs;
-      # with neither, the app runs on generated sample data (logged as
-      # [MOCK INSIGHTS]). See docs/integrations/platform-apis.md.
+      # Without CreatorDB, setting either credential selects the platform
+      # APIs; with nothing set, the app runs on generated sample data (logged
+      # as [MOCK INSIGHTS]). See docs/integrations/platform-apis.md.
       #
       # Instagram: a long-lived Page token for the agency's Facebook Page and
       # the id of the Instagram Business account linked to it. Business
@@ -196,6 +205,11 @@ services:
       #   sync: false
       # - key: YOUTUBE_API_KEY
       #   sync: false
+
+      # CreatorDB. Its credits are per account, shared with production, so give
+      # staging its own key with a spend limit set in the CreatorDB dashboard.
+      - key: CREATORDB_API_KEY
+        sync: false
 
       # Must be its own key. Tokens encrypted with the production key cannot be
       # read with this one, which is the isolation working as intended.

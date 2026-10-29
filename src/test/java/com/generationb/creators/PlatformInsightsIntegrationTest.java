@@ -83,11 +83,18 @@ class PlatformInsightsIntegrationTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("the Modash discovery endpoints are gone")
-    void discoveryEndpointsAreGone() throws Exception {
+    @DisplayName("without CreatorDB, discovery reports itself unavailable and refuses to search")
+    void discoveryNeedsCreatorDb() throws Exception {
         mockMvc.perform(get("/api/creators/discovery/status")
                         .header("Authorization", "Bearer " + adminToken))
-                .andExpect(status().is4xxClientError());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.available").value(false));
+        mockMvc.perform(post("/api/creators/discovery/search")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType("application/json")
+                        .content("{\"platform\":\"INSTAGRAM\"}"))
+                .andExpect(status().is4xxClientError())
+                .andExpect(jsonPath("$.message", containsString("CREATORDB_API_KEY")));
     }
 
     // =====================================================================

@@ -1,6 +1,10 @@
 # Creator data straight from the platforms
 
-Where every piece of creator data comes from. There is no paid vendor: Modash was removed in
+> **Since October 2026, CreatorDB is the primary source when `CREATORDB_API_KEY` is set** — see
+> [creatordb.md](creatordb.md). Everything below still applies: it is CreatorDB's fallback, the
+> only source of hashtag/mention search, and the whole answer when CreatorDB is not configured.
+
+Where every piece of creator data comes from without a paid vendor. Modash was removed in
 September 2026. Meta and Google answer what they will for free, and
 `PlatformApiCreatorInsightsProvider` routes each question to whichever can answer it.
 

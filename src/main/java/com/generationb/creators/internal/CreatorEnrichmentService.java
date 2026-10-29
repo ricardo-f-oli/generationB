@@ -1,7 +1,6 @@
 package com.generationb.creators.internal;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.generationb.creators.CreatorInsightsProvider;
 import com.generationb.foundation.ApiException;
 import com.generationb.foundation.insights.InstagramProfile;
 import com.generationb.foundation.insights.InstagramProfiles;
@@ -9,6 +8,7 @@ import com.generationb.foundation.insights.TokenCipher;
 import com.generationb.foundation.insights.YouTubeDataClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -27,8 +27,17 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Requirement #26: keeps the creators already in the database up to date, for free and without
- * asking them for anything.
+ * Requirement #26: keeps the creators already in the database up to date without asking them for
+ * anything.
+ *
+ * <h2>CreatorDB first, when configured</h2>
+ *
+ * <p>With {@code CREATORDB_API_KEY} set, the paid vendor answers first, for Instagram, TikTok and
+ * YouTube alike: followers, bio and engagement rate (profile + performance, about 5 credits), and
+ * audience demographics (10 credits). Demographics are only bought when the refresh is forced —
+ * the profile button always is — or the creator has none yet, so the daily job does not spend
+ * 10 credits a creator re-buying figures that move slowly. When CreatorDB has no record of the
+ * creator, the free sources below are tried as before.
  *
  * <h2>What can be read without the creator's permission</h2>
  *
@@ -79,13 +88,16 @@ public class CreatorEnrichmentService {
     /** Which free sources are configured, for the screen that offers the refresh. */
     public record SourceStatus(boolean live, boolean instagram, boolean youtube, boolean connections,
                                /** META when Instagram is live; null otherwise. */
-                               String instagramSource) {
+                               String instagramSource,
+                               /** CreatorDB configured: every platform, demographics included. */
+                               boolean creatorDb) {
     }
 
     // Values written to creators.insights_source.
     static final String SOURCE_INSTAGRAM_PUBLIC = "INSTAGRAM_PUBLIC";
     static final String SOURCE_YOUTUBE_PUBLIC = "YOUTUBE_PUBLIC";
     static final String SOURCE_INSTAGRAM_CONNECTED = "INSTAGRAM_CONNECTED";
+    static final String SOURCE_CREATORDB = "CREATORDB";
 
     private static final int MAX_BIO_LENGTH = 2000;
 
@@ -97,12 +109,21 @@ public class CreatorEnrichmentService {
     private final InstagramProfiles instagram;
     private final YouTubeDataClient youtube;
     private final TokenCipher tokenCipher;
+    private final CreatorDbLookup creatorDb;
+    private final AudienceReportService audienceReports;
 
-    /** The platform provider when configured, otherwise the mock — whose demographics are fake. */
-    private final CreatorInsightsProvider insightsProvider;
+    /**
+     * Only for connected-Instagram demographics, and only when the platforms are configured. Never
+     * the general provider: when that is the mock, its demographics are invented.
+     */
+    private final ObjectProvider<PlatformApiCreatorInsightsProvider> platformProvider;
 
     @Value("${insights.enrichment.ttl-hours:20}")
     private int ttlHours;
+
+    /** Longer than the free sources' window: every CreatorDB refresh costs credits. */
+    @Value("${insights.creatordb.ttl-hours:72}")
+    private int creatorDbTtlHours;
 
     @Value("${insights.enrichment.max-batch:25}")
     private int maxBatch;
@@ -110,8 +131,9 @@ public class CreatorEnrichmentService {
     public SourceStatus sourceStatus() {
         boolean instagramLive = instagram.isEnabled();
         boolean youtubeLive = youtube.isEnabled();
-        return new SourceStatus(instagramLive || youtubeLive, instagramLive, youtubeLive,
-                tokenCipher.isConfigured(), instagram.activeName());
+        boolean creatorDbLive = creatorDb.isEnabled();
+        return new SourceStatus(instagramLive || youtubeLive || creatorDbLive, instagramLive,
+                youtubeLive, tokenCipher.isConfigured(), instagram.activeName(), creatorDbLive);
     }
 
     // =====================================================================
@@ -135,11 +157,18 @@ public class CreatorEnrichmentService {
         if (!force && isFresh(creator)) {
             return EnrichmentResult.skipped(creator,
                     "Refreshed " + creator.getInsightsRefreshedAt() + "; still within "
-                            + ttlHours + " hours.");
+                            + activeTtlHours() + " hours.");
         }
 
         String platform = platformOf(creator);
         List<String> unanswered = new ArrayList<>();
+        if (creatorDb.isEnabled()) {
+            Optional<EnrichmentResult> fromVendor = enrichFromCreatorDb(creator, platform, force, unanswered);
+            if (fromVendor.isPresent()) {
+                return fromVendor.get();
+            }
+        }
+
         String source = null;
 
         // Instagram: the primary handle is an Instagram handle unless the creator is primarily on
@@ -185,8 +214,8 @@ public class CreatorEnrichmentService {
 
         if (source == null) {
             String reason = unanswered.isEmpty()
-                    ? "No free source covers this creator (TikTok has no public API, and no "
-                            + "Instagram or YouTube handle is configured for lookup)."
+                    ? "No source covers this creator (TikTok needs CreatorDB, and no Instagram "
+                            + "or YouTube handle is configured for lookup)."
                     : String.join("; ", unanswered) + ".";
             return EnrichmentResult.skipped(creator, reason);
         }
@@ -199,6 +228,66 @@ public class CreatorEnrichmentService {
         log.info("Refreshed creator {} (@{}) from {}", creator.getId(), creator.getHandle(), source);
         return new EnrichmentResult(creator.getId(), creator.getHandle(), true,
                 "Public profile refreshed.", creator.getInsightsRefreshedAt());
+    }
+
+    /**
+     * The primary platform's profile from CreatorDB. Empty when it has no record of the creator,
+     * so the free sources get their turn.
+     */
+    private Optional<EnrichmentResult> enrichFromCreatorDb(Creator creator, String platform, boolean force,
+                                                           List<String> unanswered) {
+        Optional<CreatorDbLookup.Target> target = CreatorDbLookup.targetsOf(creator).stream()
+                .filter(t -> t.platform().equals(platform))
+                .findFirst();
+        if (target.isEmpty()) {
+            return Optional.empty();
+        }
+        CreatorDbLookup.SnapshotResult lookup = creatorDb.lookupSnapshot(target.get());
+        Optional<CreatorDbLookup.Snapshot> snapshot = lookup.snapshot();
+        if (snapshot.isEmpty()) {
+            if (lookup.notIndexed()) {
+                // Free. Indexing takes a while, so it is the next refresh that benefits.
+                boolean submitted = creatorDb.submit(target.get())
+                        .filter(status -> !"rejected".equals(status))
+                        .isPresent();
+                unanswered.add("CreatorDB has not indexed @" + target.get().handle() + " yet"
+                        + (submitted ? " (submitted for indexing; refresh again in a day or two)" : ""));
+            }
+            return Optional.empty();
+        }
+
+        CreatorDbLookup.Snapshot found = snapshot.get();
+        if (found.followers() != null && found.followers() > 0) {
+            setFollowers(creator, (int) Math.min(Integer.MAX_VALUE, found.followers()));
+        }
+        if (found.erPercentage() != null) {
+            creator.setErPercentage(found.erPercentage());
+        }
+        fillBioIfBlank(creator, found.bio());
+
+        boolean audienceFound = false;
+        if (force || !hasAudience(creator)) {
+            // Stored as the creator's audience report too, so the 10 credits buy both.
+            audienceFound = applyAudience(creator, audienceReports.fetchSummary(creator, target.get()));
+        }
+        if (!audienceFound) {
+            applyConnectedDemographics(creator);
+        }
+
+        creator.setInsightsSource(SOURCE_CREATORDB);
+        creator.setInsightsRefreshedAt(Instant.now());
+        creatorRepository.save(creator);
+        captureSnapshot(creator);
+
+        log.info("Refreshed creator {} (@{}) from CreatorDB", creator.getId(), creator.getHandle());
+        return Optional.of(new EnrichmentResult(creator.getId(), creator.getHandle(), true,
+                "Profile refreshed from CreatorDB.", creator.getInsightsRefreshedAt()));
+    }
+
+    private static boolean hasAudience(Creator creator) {
+        return creator.getUkAudiencePct() != null
+                || !isBlank(creator.getAudienceAgeBand())
+                || !isBlank(creator.getAudienceGenderSplit());
     }
 
     private void applyInstagram(Creator creator, InstagramProfile profile) {
@@ -289,11 +378,15 @@ public class CreatorEnrichmentService {
      * answer; the mock's figures are invented and must never be written onto a real creator.
      */
     private boolean applyConnectedDemographics(Creator creator) {
-        if (!(insightsProvider instanceof PlatformApiCreatorInsightsProvider)
-                || !tokenCipher.isConfigured()) {
+        PlatformApiCreatorInsightsProvider platforms = platformProvider.getIfAvailable();
+        if (platforms == null || !tokenCipher.isConfigured()) {
             return false;
         }
-        Map<String, Object> audience = insightsProvider.getAudienceDemographics(creator.getId());
+        return applyAudience(creator, platforms.getAudienceDemographics(creator.getId()));
+    }
+
+    /** Writes a demographics map, from either source. False when there was nothing in it. */
+    private boolean applyAudience(Creator creator, Map<String, Object> audience) {
         if (audience == null || audience.isEmpty()) {
             return false;
         }
@@ -380,8 +473,9 @@ public class CreatorEnrichmentService {
     private void requireSources() {
         if (!sourceStatus().live()) {
             throw ApiException.unprocessable(
-                    "Profile refresh needs Instagram or YouTube configured on the server: set "
-                            + "META_ACCESS_TOKEN and META_IG_USER_ID, or YOUTUBE_API_KEY.");
+                    "Profile refresh needs a creator data source configured on the server: set "
+                            + "CREATORDB_API_KEY, or META_ACCESS_TOKEN and META_IG_USER_ID, or "
+                            + "YOUTUBE_API_KEY.");
         }
     }
 
@@ -391,7 +485,11 @@ public class CreatorEnrichmentService {
     }
 
     private Instant staleBefore() {
-        return Instant.now().minus(Duration.ofHours(ttlHours));
+        return Instant.now().minus(Duration.ofHours(activeTtlHours()));
+    }
+
+    private int activeTtlHours() {
+        return creatorDb.isEnabled() ? creatorDbTtlHours : ttlHours;
     }
 
     private static String platformOf(Creator creator) {

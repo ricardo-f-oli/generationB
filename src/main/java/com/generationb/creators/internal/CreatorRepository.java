@@ -17,6 +17,14 @@ public interface CreatorRepository extends JpaRepository<Creator, UUID> {
 
     Optional<Creator> findByHandleIgnoreCase(String handle);
 
+    /**
+     * Active creators whose main, TikTok or YouTube handle is one of {@code handles} (lowercase,
+     * with and without the leading @). Discovery uses it to mark results already on the database.
+     */
+    @Query("SELECT c FROM Creator c WHERE c.deletedAt IS NULL AND (LOWER(c.handle) IN :handles "
+            + "OR LOWER(c.tiktokHandle) IN :handles OR LOWER(c.youtubeHandle) IN :handles)")
+    List<Creator> findActiveByAnyHandle(@Param("handles") java.util.Collection<String> handles);
+
     Optional<Creator> findByEmailIgnoreCase(String email);
 
     /**

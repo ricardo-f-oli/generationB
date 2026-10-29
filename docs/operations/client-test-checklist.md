@@ -44,7 +44,8 @@ Event Webhook Requests*.
 
 | Variable | Without it |
 |---|---|
-| `META_ACCESS_TOKEN` + `META_IG_USER_ID`, and/or `YOUTUBE_API_KEY` | Profile refresh and auto-clipping run on the mock, logged as `[MOCK INSIGHTS]`. All free — no paid data vendor |
+| `CREATORDB_API_KEY` | No TikTok data, no audience demographics for unconnected creators, no creator discovery. Paid (credits) — see `docs/integrations/creatordb.md` |
+| `META_ACCESS_TOKEN` + `META_IG_USER_ID`, and/or `YOUTUBE_API_KEY` | With CreatorDB: no fallback for creators it has not indexed, and no hashtag/mention search. Without CreatorDB either: profile refresh and auto-clipping run on the mock, logged as `[MOCK INSIGHTS]` |
 | `GROQ_API_KEY` | AI drafting returns a written fallback rather than generated copy |
 | `OUTREACH_SENDGRID_API_KEY` | Nothing is emailed |
 | `SENDGRID_WEBHOOK_PUBLIC_KEY` | Delivery events rejected (see above) |

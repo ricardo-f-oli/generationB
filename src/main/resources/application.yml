@@ -98,11 +98,16 @@ ai:
   timeout-seconds: ${AI_TIMEOUT_SECONDS:20}
   max-tokens: ${AI_MAX_TOKENS:1200}
 
-# Creator data, straight from the platforms — no paid vendor.
+# Creator data: CreatorDB (paid) first, the platforms' own free APIs behind it.
 #
-# Setting META_ACCESS_TOKEN or YOUTUBE_API_KEY selects the platform APIs; with neither, the app
-# runs on generated sample data and logs every call as [MOCK INSIGHTS]. INSIGHTS_PROVIDER only
-# exists to override that (`platform` or `mock`) — see InsightsProviderCondition.
+# Setting CREATORDB_API_KEY selects CreatorDB for discovery, posts and demographics on Instagram,
+# TikTok and YouTube. Setting META_ACCESS_TOKEN or YOUTUBE_API_KEY as well keeps the platform APIs
+# as its fallback (and for hashtag/mention search, which CreatorDB does not offer); either on its
+# own works too. With none of them, the app runs on generated sample data and logs every call as
+# [MOCK INSIGHTS]. INSIGHTS_PROVIDER only exists to override that (`creatordb`, `platform` or
+# `mock`) — see InsightsProviderCondition.
+#
+# Without CreatorDB, from the platforms alone:
 #
 # What you get, and what you do not:
 #   Instagram  followers, bio and posts for ANY public Business/Creator account (Business Discovery),
@@ -115,6 +120,23 @@ ai:
 #   Search     no platform exposes a creator index; search runs on our own database
 insights:
   provider: ${INSIGHTS_PROVIDER:}
+
+  # CreatorDB API v3 (https://docs.creatordb.app/api-v3/introduction). Every call costs credits
+  # and there is no sandbox: profile 2, performance 1.5-3, recent posts 3, audience 10, search 1.
+  creatordb:
+    base-url: ${CREATORDB_BASE_URL:https://apiv3.creatordb.app}
+    api-key: ${CREATORDB_API_KEY:}
+    timeout-seconds: ${CREATORDB_TIMEOUT_SECONDS:30}
+    # Calls stop once the balance CreatorDB reports falls to this, so a background job cannot
+    # spend the last of the month's credits. Manual top-up or the plan refresh lifts it.
+    min-credits: ${CREATORDB_MIN_CREDITS:100}
+    # Profile refresh window when CreatorDB is the source. Longer than the free sources' 20 hours
+    # because every refresh costs about 5 credits (15 with demographics).
+    ttl-hours: ${CREATORDB_TTL_HOURS:72}
+    # A creator's recent posts are reused for this long, so clipping a campaign twice in a row
+    # costs once.
+    post-cache-minutes: ${CREATORDB_POST_CACHE_MINUTES:60}
+    search-page-size: ${CREATORDB_SEARCH_PAGE_SIZE:25}
   meta:
     base-url: ${META_BASE_URL:https://graph.facebook.com}
     # Pinned. Meta deprecates a version roughly every two years and changes field shapes between

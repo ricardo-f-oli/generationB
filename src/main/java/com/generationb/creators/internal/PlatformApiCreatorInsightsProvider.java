@@ -13,7 +13,6 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Conditional;
-import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -29,6 +28,9 @@ import java.util.UUID;
 
 /**
  * Creator data straight from the platforms, with no data vendor in between.
+ *
+ * <p>Since CreatorDB was adopted this is its fallback when both are configured, and still the
+ * whole answer when only Meta or YouTube is — see {@link InsightsProviderCondition}.
  *
  * <p>Built when the paid vendor stopped being affordable. Meta, Google and TikTok will each
  * answer some of what the vendor did, for nothing, and this routes each question to whichever of
@@ -66,7 +68,6 @@ import java.util.UUID;
  * {@link #searchCreators} reports that plainly rather than pretending.
  */
 @Slf4j
-@Primary
 @Component
 @RequiredArgsConstructor
 @Conditional(InsightsProviderCondition.PlatformApis.class)
